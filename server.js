@@ -12,7 +12,10 @@ const PORT = Number(process.env.PORT) || 3000;
 const MAX_BODY = (Number(process.env.MAX_BODY_MB) || 30) * 1024 * 1024;
 const SESSION_TTL = 12 * 3600;                        // secondes (le client attend 43200)
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim()).filter(Boolean);
-const PUBLIC_DIR = path.join(__dirname, 'public');
+/* Fichiers de l'application : dossier public/ s'il existe, sinon directement à la racine (liste blanche). */
+const HAS_PUBLIC = fs.existsSync(path.join(__dirname, 'public'));
+const PUBLIC_DIR = HAS_PUBLIC ? path.join(__dirname, 'public') : __dirname;
+const ROOT_ALLOWED = new Set(['index.html', 'manifest.json', 'sw.js', 'icon-192.png', 'icon-512.png']);
 
 /* ---------- jeux de clés synchronisées ---------- */
 const ARRAY_ADMIN = ['teachers', 'parents', 'classes', 'subjects', 'sequences', 'templates', 'events', 'annonces', 'students'];
@@ -467,7 +470,8 @@ function readBody(req) {
 function serveStatic(req, res, url) {
   let rel = decodeURIComponent(url.pathname); if (rel === '/') rel = '/index.html';
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
-  if (!file.startsWith(PUBLIC_DIR) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+  const forbidden = !HAS_PUBLIC && (path.dirname(file) !== __dirname || !ROOT_ALLOWED.has(path.basename(file)));
+  if (forbidden || !file.startsWith(PUBLIC_DIR) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
     const idx = path.join(PUBLIC_DIR, 'index.html');
     if (req.method === 'GET' && !path.extname(rel) && fs.existsSync(idx)) return sendFile(res, idx);
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Introuvable');
