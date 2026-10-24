@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: portail-parents
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: NODE_VERSION
+        value: 20
