@@ -22,6 +22,7 @@ const ARRAY_ADMIN = ['teachers', 'parents', 'classes', 'subjects', 'sequences', 
 const OBJECT_ADMIN = ['classPrincipals', 'supervisor', 'profiles', 'smsSettings', 'whatsappSettings'];
 const SHARED = ['messages', 'bulletins', 'bulletinRequests', 'bulletinHistory', 'grades', 'absences'];
 const MAX_RECORDS = 60000;
+const MAX_FILE = (Number(process.env.MAX_FILE_MB) || 10) * 1024 * 1024;
 
 /* ---------- utilitaires ---------- */
 const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
@@ -214,7 +215,7 @@ function authorize(key, old, raw, ctx) {
       return null;
     }
     case 'bulletins': {
-      if (role === 'teacher' && old && String(old.principalTeacherId) === String(ref)) return mergeRecord(key, old, pick(raw, ['stage', 'forwardedAt', 'forwardedBy']));
+      if (role === 'teacher' && old && old.requestId != null && String(old.principalTeacherId) === String(ref)) return mergeRecord(key, old, pick(raw, ['stage', 'forwardedAt', 'forwardedBy']));
       return null;
     }
     case 'bulletinHistory': {
@@ -280,7 +281,7 @@ function viewFor(ctx) {
     out.students = A('students').filter(s => myKids.includes(norm(s.name)));
     out.bulletinRequests = A('bulletinRequests').filter(r => String(r.parentId) === String(ctx.ref));
     const reqIds = new Set(out.bulletinRequests.map(r => String(r.id)));
-    out.bulletins = A('bulletins').filter(b => b.stage === 'sentToParents' && inClasses(ctx, b.className) && (b.requestId == null || reqIds.has(String(b.requestId))));
+    out.bulletins = A('bulletins').filter(b => b.stage === 'sentToParents' && inClasses(ctx, b.className) && b.requestId != null && reqIds.has(String(b.requestId)));
     out.bulletinHistory = A('bulletinHistory').filter(h => String(h.parentId) === String(ctx.ref));
     out.grades = A('grades').filter(g => inClasses(ctx, g.className) && myKids.includes(norm(g.student)));
     out.absences = A('absences').filter(a => inClasses(ctx, a.className) && myKids.includes(norm(a.student)));
@@ -417,6 +418,36 @@ function changePassword(acc, body) {
   return { ok: true };
 }
 
+/* ---------- fichiers (bulletins PDF) ---------- */
+function canReadFile(acc, id) {
+  const b = (db.state.bulletins || []).find(x => x.fileId === id);
+  if (!b) return false;
+  if (acc.role === 'admin') return true;
+  if (acc.role === 'teacher') return String(b.principalTeacherId) === String(acc.refId);
+  if (acc.role === 'parent') {
+    return b.stage === 'sentToParents' && b.requestId != null &&
+      (db.state.bulletinRequests || []).some(r => String(r.id) === String(b.requestId) && String(r.parentId) === String(acc.refId));
+  }
+  return false;
+}
+async function uploadFile(acc, body) {
+  need(acc.role === 'admin', 403, 'Accès administrateur requis');
+  need(isObj(body) && typeof body.data === 'string' && body.data.length > 0, 400, 'Fichier manquant');
+  const b64 = body.data.replace(/^data:[^,]*,/, '');
+  const buf = Buffer.from(b64, 'base64');
+  need(buf.length > 0 && buf.length <= MAX_FILE, 413, 'Fichier trop volumineux (maximum ' + Math.round(MAX_FILE / 1048576) + ' Mo)');
+  need(buf.slice(0, 5).toString('latin1') === '%PDF-', 400, 'Le fichier doit être un PDF');
+  const id = crypto.randomBytes(12).toString('hex');
+  await store.putFile(id, buf);
+  db.files[id] = { name: String(body.name || 'bulletin.pdf').slice(0, 120), size: buf.length, createdAt: Date.now() };
+  persist();
+  return { id, size: buf.length, name: db.files[id].name };
+}
+async function gcFiles() {
+  const used = new Set((db.state.bulletins || []).map(b => b.fileId).filter(Boolean));
+  for (const [id, f] of Object.entries(db.files)) if (!used.has(id) && Date.now() - f.createdAt > 30 * 60 * 1000) { delete db.files[id]; await store.delFile(id); }
+}
+
 async function route(req, res, url, body, ip) {
   const p = url.pathname, m = req.method;
   if (p === '/api/health' && m === 'GET') return { ok: true, service: SERVICE, version: VERSION, time: new Date().toISOString(), revision: db.revision };
@@ -425,7 +456,14 @@ async function route(req, res, url, body, ip) {
   need(acc, 401, 'Session expirée ou invalide');
   if (p === '/api/auth/logout' && m === 'POST') { const h = sha256(/^Bearer (.+)$/.exec(req.headers.authorization)[1]); delete db.sessions[h]; persist(); return { ok: true }; }
   if (p === '/api/auth/password' && m === 'POST') return changePassword(acc, body);
-  if (p === '/api/sync' && m === 'POST') return sync(acc, body);
+  if (p === '/api/files' && m === 'POST') return uploadFile(acc, body);
+  let fm = /^\/api\/files\/([0-9a-f]{24})$/.exec(p);
+  if (fm && m === 'GET') {
+    need(canReadFile(acc, fm[1]), 404, 'Fichier introuvable');
+    const buf = await store.getFile(fm[1]); need(buf, 404, 'Fichier introuvable');
+    return { _binary: buf, _name: (db.files[fm[1]] || {}).name || 'bulletin.pdf' };
+  }
+  if (p === '/api/sync' && m === 'POST') { const out = sync(acc, body); if (acc.role === 'admin') gcFiles().catch(() => {}); return out; }
   if (p === '/api/messages' && m === 'POST') return publishMessage(acc, body);
   let mm = /^\/api\/messages\/([^/]+)\/read$/.exec(p);
   if (mm && m === 'POST') return markRead(acc, decodeURIComponent(mm[1]), body);
@@ -469,6 +507,12 @@ function readBody(req) {
 }
 function serveStatic(req, res, url) {
   let rel = decodeURIComponent(url.pathname); if (rel === '/') rel = '/index.html';
+  if (rel === '/.well-known/assetlinks.json') {          // vérification de l'APK (Trusted Web Activity)
+    let body = process.env.ASSETLINKS_JSON || '';
+    if (!body) for (const f of [path.join(__dirname, 'assetlinks.json'), path.join(PUBLIC_DIR, 'assetlinks.json')]) { if (fs.existsSync(f)) { body = fs.readFileSync(f, 'utf8'); break; } }
+    if (!body) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Introuvable'); }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' }); return res.end(body);
+  }
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
   const forbidden = !HAS_PUBLIC && (path.dirname(file) !== __dirname || !ROOT_ALLOWED.has(path.basename(file)));
   if (forbidden || !file.startsWith(PUBLIC_DIR) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
@@ -500,6 +544,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
     const body = req.method === 'POST' ? await readBody(req) : null;
     const out = await route(req, res, url, body, ip);
+    if (out && out._binary) {
+      res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': out._binary.length, 'Cache-Control': 'private, no-store', 'Content-Disposition': 'attachment; filename="' + String(out._name).replace(/[^\w.\- ]/g, '_') + '"' });
+      return res.end(out._binary);
+    }
     send(res, 200, out);
   } catch (e) {
     const status = e instanceof HttpError ? e.status : 500;
@@ -511,7 +559,7 @@ const server = http.createServer(async (req, res) => {
 
 async function start() {
   db = (await store.load()) || freshDb();
-  ['accounts', 'sessions', 'notifs', 'state'].forEach(k => { if (!db[k]) db[k] = {}; });
+  ['accounts', 'sessions', 'notifs', 'state', 'files'].forEach(k => { if (!db[k]) db[k] = {}; });
   db.revision = db.revision || 0; db.adminRevision = db.adminRevision || 0;
   ensureAdmin();
   server.listen(PORT, () => console.log(`${SERVICE} ${VERSION} — port ${PORT} — stockage : ${store.kind} — révision ${db.revision}`));

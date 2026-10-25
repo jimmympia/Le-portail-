@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Portail Parents">
 <script>if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<title>Portail Parents — V2.3.111</title>
+<title>Portail Parents — V2.3.112</title>
 <style>
 *{box-sizing:border-box}
 :root{
@@ -1721,7 +1721,7 @@ function shell(){
   let un = unreadNotifs();
   return `<div class="layout">
     <aside class="side">
-      <div class="brand"><img class="brand-logo" src="${LOGO_DATA_URL}" alt="Logo CST"><span class="brand-text">Portail Parents</span><span class="version-tag">v2.3.111</span></div>
+      <div class="brand"><img class="brand-logo" src="${LOGO_DATA_URL}" alt="Logo CST"><span class="brand-text">Portail Parents</span><span class="version-tag">v2.3.112</span></div>
       <nav class="nav">
         <button data-page="home" class="${page==="home"?"active":""}" onclick="go('home')" aria-label="Accueil">Accueil</button>
         <button data-page="communication" class="${page==="communication"?"active":""}" onclick="go('communication')" aria-label="Communication">Communication</button>
@@ -5329,11 +5329,11 @@ function saveProfile(){
   }
 }
 
-/* ===== 2.3.111 — stat() manquante (pages Communication, Bloc 2, Contrôle, Bloc 3) ===== */
+/* ===== 2.3.112 — stat() manquante (pages Communication, Bloc 2, Contrôle, Bloc 3) ===== */
 function stat(label, value, icon){
   return '<div class="stat-card"><div class="label">' + (icon ? icon + ' ' : '') + esc(String(label)) + '</div><div class="value">' + esc(String(value == null ? 0 : value)) + '</div></div>';
 }
-/* ===== 2.3.111 — mot de passe provisoire : changement obligatoire ===== */
+/* ===== 2.3.112 — mot de passe provisoire : changement obligatoire ===== */
 function mustChangeFor(userVal){
   try{
     if (state.api && state.api.sessionToken) return false;
@@ -5368,7 +5368,7 @@ function showForcedPasswordChange(userVal){
   };
 }
 
-/* ===== 2.3.111 — carte de synchronisation (accueil) ===== */
+/* ===== 2.3.112 — carte de synchronisation (accueil) ===== */
 function ppSyncCard(){
   var a = state.api || {}, on = !!(a.enabled && a.baseUrl && a.sessionToken), txt;
   if (on) txt = a.lastSyncStatus === "offline" ? "Serveur injoignable — vos données restent sur ce téléphone" : "Connecté au serveur central";
@@ -5376,6 +5376,34 @@ function ppSyncCard(){
   else txt = "Mode local — données uniquement sur ce téléphone";
   var last = a.lastSyncAt ? "Dernière synchronisation : " + new Date(a.lastSyncAt).toLocaleString("fr-FR") : "";
   return '<div class="panel" style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:180px"><strong>' + esc(txt) + '</strong>' + (last ? '<div class="muted" style="font-size:12px">' + esc(last) + '</div>' : '') + '</div>' + (on ? '<button class="btn sec" onclick="syncWithServer(false)">Synchroniser</button>' : '') + '</div>';
+}
+
+/* ===== 2.3.112 — PDF des bulletins : stockés sur le serveur quand il est connecté ===== */
+function ppServerFilesOn(){ return !!(state.api && state.api.enabled && state.api.baseUrl && state.api.sessionToken); }
+function ppReadDataUrl(file){ return new Promise(function(res, rej){ var r = new FileReader(); r.onload = function(){ res(String(r.result || "")); }; r.onerror = function(){ rej(new Error("Lecture du PDF impossible. Réessayez.")); }; r.readAsDataURL(file); }); }
+async function ppStoreBulletinFile(file){
+  var online = ppServerFilesOn(), max = online ? 10 * 1024 * 1024 : 1.8 * 1024 * 1024;
+  if (file.size > max) throw new Error("PDF trop volumineux : maximum " + (online ? "10" : "1,8") + " Mo");
+  var data = await ppReadDataUrl(file);
+  if (!data) throw new Error("Le PDF n’a pas pu être lu");
+  if (online) { var r = await apiRequest("/api/files", { method: "POST", body: JSON.stringify({ name: file.name, data: data }) }); return { fileId: r.id, data: "", size: r.size }; }
+  return { fileId: null, data: data, size: file.size };
+}
+async function ppBulletinHref(b){
+  if (b.data) return { href: b.data };
+  if (!b.fileId) throw new Error("Bulletin indisponible");
+  var resp = await fetch(apiUrl("/api/files/" + b.fileId), { headers: { Authorization: "Bearer " + (state.api && state.api.sessionToken || "") } });
+  if (!resp.ok) throw new Error(resp.status === 404 ? "Bulletin introuvable ou accès refusé" : resp.status === 401 ? "Session expirée : reconnectez-vous" : "Téléchargement impossible (" + resp.status + ")");
+  return { href: URL.createObjectURL(await resp.blob()), revoke: true };
+}
+async function ppDownloadBulletinFile(b, filename){
+  try {
+    toast("Téléchargement en cours…");
+    var h = await ppBulletinHref(b), a = document.createElement("a");
+    a.href = h.href; a.download = String(filename || b.name || "Bulletin.pdf").replace(/[\\/:*?"<>|]/g, "_");
+    document.body.appendChild(a); a.click(); a.remove();
+    if (h.revoke) setTimeout(function(){ URL.revokeObjectURL(h.href); }, 5000);
+  } catch (e) { toast(e.message || "Téléchargement impossible"); }
 }
 
 function changePassword(){
@@ -5786,7 +5814,7 @@ function render(){
       if (state.user && !canAccessPage(page)) page = "home";
       root.innerHTML = state.user ? shell() : loginView();
     }
-    var versionBanner = '<div id="ppVersionBanner" style="position:relative;z-index:99999;background:#fff3a6;color:#4a3b00;border:2px solid #d4a900;border-radius:8px;padding:9px 12px;margin:8px auto;max-width:1000px;font:700 13px Arial,sans-serif;text-align:center">PORTAIL PARENTS V2.3.111 | rôle=' + (isAdmin() ? 'administration' : (isSupervisor() ? 'surveillant général' : (isTeacher() ? 'enseignant' : (state.user ? 'parent/autre' : 'non connecté')))) + ' | parents actifs=' + ((Array.isArray(state.parents) ? state.parents : []).filter(function(p){ return p && p.active !== false && p.name; }).length) + '</div>';
+    var versionBanner = '<div id="ppVersionBanner" style="position:relative;z-index:99999;background:#fff3a6;color:#4a3b00;border:2px solid #d4a900;border-radius:8px;padding:9px 12px;margin:8px auto;max-width:1000px;font:700 13px Arial,sans-serif;text-align:center">PORTAIL PARENTS V2.3.112 | rôle=' + (isAdmin() ? 'administration' : (isSupervisor() ? 'surveillant général' : (isTeacher() ? 'enseignant' : (state.user ? 'parent/autre' : 'non connecté')))) + ' | parents actifs=' + ((Array.isArray(state.parents) ? state.parents : []).filter(function(p){ return p && p.active !== false && p.name; }).length) + '</div>';
     try { var ff = document.getElementById('ppForcePwd'); if (state.user && mustChangeFor(state.user)) showForcedPasswordChange(state.user); else if (ff) ff.remove(); } catch (e) {}
   } catch (e) {
     console.error("Portail Parents render error:", e);
@@ -5812,7 +5840,7 @@ try { applyTheme(); render(); } catch (bootErr) {
 /* PORTAIL PARENTS — correctifs métier V2.3.78 */
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.111';
+  window.GESCO_VERSION='2.3.112';
   document.title='Portail Parents — CST Manjo';
   var oldView=view;
   canAccessPage=function(p){
@@ -5885,7 +5913,7 @@ try { applyTheme(); render(); } catch (bootErr) {
     save();render();toast(v?'Professeur principal affecté à '+c:'Affectation retirée pour '+c);
   };
   view=function(){
-    if(page==='bulletins')return (typeof window.bulletinView==='function'?window.bulletinView:bulletinView)();
+    if(page==='bulletins')return (typeof window.ppBulletinRoute==='function'?window.ppBulletinRoute:(typeof window.bulletinView==='function'?window.bulletinView:bulletinView))();
     if(page==='affectations')return classPrincipalView();
     return oldView();
   };
@@ -6217,7 +6245,7 @@ window.gesco435Mount=mount435;
   window.gesco36Panel=function(){
     ensure(); var s=st(),a=s.stage36_38.lastAudit;
     var rows=a?a.checks.map(function(x){return '<div class="item"><b>'+(x.ok?'✓':'⚠')+' '+escS(x.name)+'</b><div class="muted">'+escS(x.detail)+'</div></div>';}).join(''): '<div class="empty">Aucun audit exécuté.</div>';
-    return '<div class="panel" id="stage36Panel"><div class="panel-head"><div><h2>Finalisation — Sauvegarde et contrôle</h2><p class="muted">Sauvegarde · sécurité · audit fonctionnel.</p></div><span class="badge">v2.3.111</span></div>'+
+    return '<div class="panel" id="stage36Panel"><div class="panel-head"><div><h2>Finalisation — Sauvegarde et contrôle</h2><p class="muted">Sauvegarde · sécurité · audit fonctionnel.</p></div><span class="badge">v2.3.112</span></div>'+
       '<div class="grid">'+
       '<div class="card"><b>Étape 36</b><p class="muted">Sauvegarde complète + copie locale de sécurité.</p><button class="btn primary" onclick="gesco36Backup()">⬇ Sauvegarder maintenant</button></div>'+ 
       '<div class="card"><b>Étape 37</b><p class="muted">Session, rôles et actions sensibles protégés.</p><button class="btn secondary" onclick="if(typeof requireSession===\'function\'&&requireSession()){toast(\'Contrôle de sécurité OK\');gesco36RunAudit()}">🔐 Vérifier la sécurité</button></div>'+ 
@@ -6267,7 +6295,7 @@ window.gesco435Mount=mount435;
 <script id="gescoFinalConsolidation68">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.111';
+  window.GESCO_VERSION='2.3.112';
   function S(){return window.state || (typeof state!=='undefined' ? state : {});}
   function A(v){return Array.isArray(v)?v:[];}
   window.gesco68ValidateData=function(){
@@ -6434,7 +6462,7 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
 <script>
 /* PORTAIL PARENTS 2.3.79 — règles de communication et visibilité */
 (function(){
-  window.GESCO_VERSION='2.3.111';
+  window.GESCO_VERSION='2.3.112';
   function parentClasses(p){
     if(!p) return [];
     var kids=Array.isArray(p.children)?p.children:[];
@@ -6561,7 +6589,7 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
 <script id="portalSupervisorV2385">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.111';
+  window.GESCO_VERSION='2.3.112';
   function escS(v){return typeof esc==='function'?esc(String(v==null?'':v)):String(v||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
   var priorAccess=canAccessPage;
   canAccessPage=function(p){
@@ -6616,6 +6644,66 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
     if(!isSupervisor())return oldVisibleNotifications();
     var sg=currentSupervisor(),name=sg?sg.name:'Surveillant général';
     return (state.notifications||[]).filter(function(n){return n.to===name||n.toUserId==='supervisor:1'||n.targetRole==='supervisor'||/absence|retard|disciplin/.test(String(n.text||'').toLowerCase());});
+  };
+})();
+</script>
+<script id="pp-class-bulletins">
+(function(){
+  function nz(x){ return String(x == null ? "" : x).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim(); }
+  function entries(){ try { return window.__ppPrincipalEntriesReliable ? (window.__ppPrincipalEntriesReliable() || []) : []; } catch (e) { return []; } }
+  window.ppBcSeq = window.ppBcSeq || "Séquence 1";
+  function panel(){
+    var seqs = ["Séquence 1", "Séquence 2", "Séquence 3", "Séquence 4"], ents = entries();
+    var h = '<div class="panel"><h3>Distribuer aux professeurs principaux</h3><p class="muted">Importez le PDF officiel de chaque classe : il est envoyé directement au professeur principal de la classe, qui le télécharge.</p>';
+    h += '<div class="field"><label>Séquence</label><select onchange="window.ppBcSeq=this.value;render()">' + seqs.map(function(q){ return '<option' + (q === window.ppBcSeq ? " selected" : "") + '>' + esc(q) + '</option>'; }).join("") + '</select></div>';
+    if (!ents.length) h += '<p class="empty">Aucun professeur principal n’est affecté. Ouvrez « Professeurs principaux » pour en désigner un par classe.</p>';
+    var done = 0;
+    ents.forEach(function(e){
+      var b = (state.bulletins || []).find(function(x){ return x && x.kind === "class" && nz(x.className) === nz(e.cls) && x.sequence === window.ppBcSeq && x.available !== false; });
+      if (b) done++;
+      h += '<div class="item"><b>' + esc(e.cls) + '</b> — ' + esc((e.teacher && e.teacher.name) || "Professeur principal")
+        + (b ? '<p class="muted">✓ Envoyé le ' + esc(b.date || "") + ' · ' + esc(b.name || "PDF") + '</p>' : '<p class="muted">Pas encore importé</p>')
+        + '<label class="btn primary" style="display:inline-block;margin:6px 6px 0 0">' + (b ? "Remplacer le PDF" : "Importer le PDF")
+        + '<input type="file" accept="application/pdf,.pdf" style="display:none" data-class="' + esc(e.cls) + '" onchange="portalImportClassBulletin(this)"></label>'
+        + (b ? '<button class="btn secondary" onclick="portalDeleteClassBulletin(' + Number(b.id) + ')">Retirer</button>' : "") + '</div>';
+    });
+    if (ents.length) h += '<p class="muted" style="margin-top:8px">' + done + " classe(s) sur " + ents.length + " ont reçu leur bulletin pour cette séquence.</p>";
+    return h + '</div>';
+  }
+  window.ppBulletinRoute = function(){
+    var h = typeof window.bulletinView === "function" ? window.bulletinView() : "";
+    if (typeof isAdmin === "function" && isAdmin()) {
+      var mk = '<div class="panel"><h3>Demandes des parents en attente', i = h.indexOf(mk);
+      h = i === -1 ? h + panel() : h.slice(0, i) + panel() + h.slice(i);
+    }
+    return h;
+  };
+  window.portalImportClassBulletin = function(input){
+    if (!requireSession() || !isAdmin()) return toast("Import réservé à l’administration");
+    var file = input.files && input.files[0], cls = input.getAttribute("data-class"), seq = window.ppBcSeq || "Séquence 1";
+    if (!file) return;
+    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) return toast("Le fichier doit être un PDF");
+    var ent = entries().find(function(e){ return nz(e.cls) === nz(cls); });
+    if (!ent || !ent.teacher) return toast("Aucun professeur principal n’est affecté à " + cls);
+    toast("Envoi du PDF en cours…");
+    ppStoreBulletinFile(file).then(function(stored){
+      state.bulletins = Array.isArray(state.bulletins) ? state.bulletins : [];
+      var old = state.bulletins.slice();
+      state.bulletins = state.bulletins.filter(function(b){ return !(b && b.kind === "class" && nz(b.className) === nz(cls) && b.sequence === seq); });
+      var rec = { id: Date.now(), className: cls, sequence: seq, name: file.name, data: stored.data, fileId: stored.fileId, size: stored.size, date: todayStr(), type: "sequentiel", kind: "class", available: true, stage: "toPrincipal", principalTeacherId: ent.teacher.id, importedBy: "admin" };
+      state.bulletins.push(rec);
+      if (typeof markLocalChange === "function") markLocalChange();
+      if (!save()) { state.bulletins = old; return toast("Stockage insuffisant : bulletin non enregistré"); }
+      try { window.__ppRecordBulletinEvent("bulletin_classe_importe", { bulletinId: rec.id, teacherId: ent.teacher.id, className: cls, sequence: seq, details: "PDF de classe envoyé au professeur principal" }); } catch (e) {}
+      try {
+        var msg = { id: Date.now() + 1, from: "Administration", to: ent.teacher.name || "Professeur principal", subject: "Bulletin " + seq + " — " + cls, body: "Le bulletin de la classe " + cls + " (" + seq + ") est disponible dans votre espace Bulletins. Téléchargez-le puis remettez-le aux élèves ou à leurs parents.", date: nowStr(), read: false, readBy: {}, deliveryStatus: "queued", sentAt: null, deliveredAt: null, readAt: null, attach: null, voice: null, parentId: null, recipientId: ent.teacher.id, recipientRole: "teacher", senderId: "admin", senderRole: "admin", group: null, bulletinId: rec.id };
+        state.messages = Array.isArray(state.messages) ? state.messages : []; state.messages.push(msg); save();
+        Promise.resolve(publishMessageToServer(msg)).catch(function(){});
+      } catch (e) {}
+      try { if (typeof logActivity === "function") logActivity("Bulletin de classe envoyé", cls + " — " + seq + " — " + (ent.teacher.name || "")); } catch (e) {}
+      render(); toast("Bulletin envoyé à " + (ent.teacher.name || "professeur principal") + ".");
+      if (state.api && state.api.sessionToken) syncWithServer(true);
+    }).catch(function(e){ toast(e.message || "Envoi impossible"); });
   };
 })();
 </script>
@@ -6708,7 +6796,7 @@ window.__ppServerReady = (function(){
 (function(){
   window.PORTAIL_PARENTS_DIAGNOSTIC = function(){
     var e=window.__PP_LAST_RENDER_ERROR||null;
-    var out={version:'2.3.111',page:typeof page!=='undefined'?page:null,userRole:(typeof isAdmin==='function'&&isAdmin())?'admin':((typeof isSupervisor==='function'&&isSupervisor())?'supervisor':((typeof isTeacher==='function'&&isTeacher())?'teacher':'parent')),lastRenderError:e,localStorageAvailable:!!window.localStorage};
+    var out={version:'2.3.112',page:typeof page!=='undefined'?page:null,userRole:(typeof isAdmin==='function'&&isAdmin())?'admin':((typeof isSupervisor==='function'&&isSupervisor())?'supervisor':((typeof isTeacher==='function'&&isTeacher())?'teacher':'parent')),lastRenderError:e,localStorageAvailable:!!window.localStorage};
     var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,2)],{type:'application/json'}));a.download='portail-parents-diagnostic-v2-3-109.json';a.click();setTimeout(function(){URL.revokeObjectURL(a.href)},1000);
   };
 })();
@@ -6718,7 +6806,7 @@ window.__ppServerReady = (function(){
 <script id="pp23100-finalisation-communication-bulletins">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.111';
+  window.GESCO_VERSION='2.3.112';
   function safeText(v){return typeof esc==='function'?esc(String(v==null?'':v)):String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
   function parentClassList(p){
     if(!p)return [];
@@ -6739,7 +6827,7 @@ window.__ppServerReady = (function(){
     var h=previousShell();
     if(isTeacher()||isSupervisor()) h=h.replace(/<button data-page="bulletins"[\s\S]*?<\/button>/,'');
     if(!isAdmin()) h=h.replace(/<button data-page="affectations"[\s\S]*?<\/button>/,'');
-    h=h.replace(/v2\.3\.99/g,'v2.3.111');
+    h=h.replace(/v2\.3\.99/g,'v2.3.112');
     return h;
   };
   var previousBulletinView=window.bulletinView;
@@ -6776,7 +6864,7 @@ window.__ppServerReady = (function(){
   };
   window.portalDownloadBulletin=function(id){
     var b=(state.bulletins||[]).find(function(x){return String(x.id)===String(id)});
-    if(!b||!b.data||b.available===false)return toast('Bulletin indisponible');
+    if(!b||!(b.data||b.fileId)||b.available===false)return toast('Bulletin indisponible');
     if(!isAdmin()){
       var p=currentParent();
       if(isTeacher()||isSupervisor()||!p||parentClassList(p).indexOf(b.className)===-1)return toast('Accès refusé : ce bulletin ne concerne pas votre compte.');
@@ -6801,7 +6889,7 @@ window.__ppServerReady = (function(){
 <script id="pp23103-destinataires-fiables">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.111';
+  window.GESCO_VERSION='2.3.112';
   function norm(v){return String(v==null?'':v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/\s+/g,' ');}
   function idOfUser(){var u=state&&state.user;if(u&&typeof u==='object')return u.id!=null?String(u.id):'';var z=String(u==null?'':u);return z.indexOf('teacher:')===0?z.slice(8):(z.indexOf('parent:')===0?z.slice(7):z);}
   window.currentTeacher=function(){if(!isTeacher())return null;var id=idOfUser();return (state.teachers||[]).find(function(t){return t&&String(t.id)===id;})||null;};
@@ -6847,8 +6935,8 @@ window.__ppServerReady = (function(){
     var read=typeof readAttachment==='function'?readAttachment(document.getElementById('attach')):Promise.resolve(null);
     Promise.resolve(read).then(function(attach){var msg={id:Date.now(),from:typeof myLabel==='function'?myLabel():(admin?'Administration':teacher?(t&&t.name||'Enseignant'):parent?parent.name:'Surveillant général'),to:toLabel,subject:sub,body:body,date:typeof nowStr==='function'?nowStr():new Date().toLocaleString(),read:false,readBy:{},deliveryStatus:'queued',sentAt:null,deliveredAt:null,readAt:null,attach:attach||null,voice:window._gescoVoiceAttachment||null,parentId:parentId,recipientId:recipientId==null?null:(isNaN(Number(recipientId))?recipientId:Number(recipientId)),recipientRole:kind,senderId:senderId,senderRole:admin?'admin':(supervisor?'supervisor':(teacher?'teacher':'parent')),group:null};state.messages=Array.isArray(state.messages)?state.messages:[];state.messages.push(msg);window._gescoVoiceAttachment=null;try{if(typeof logActivity==='function')logActivity('Message envoyé',sub+' → '+toLabel);if(typeof pushNotif==='function')pushNotif('Nouveau message : '+sub+' — '+toLabel,'message','message',msg.id);}catch(e){}try{if((admin||teacher||supervisor)&&parentId){if(typeof triggerAutoSMS==='function')triggerAutoSMS('message',{parentId:parentId,subject:sub});if(typeof triggerAutoWhatsApp==='function')triggerAutoWhatsApp('message',{parentId:parentId,subject:sub,fullBody:body});}}catch(e){}if(typeof save==='function')save(false);try{if(typeof publishMessageToServer==='function')Promise.resolve(publishMessageToServer(msg)).then(function(ok){if(ok){msg.sentAt=typeof nowStr==='function'?nowStr():new Date().toLocaleString();save(false);}}).catch(function(){});}catch(e){}toast('Message envoyé à '+toLabel);if(typeof go==='function')go('messages');}).catch(function(){if(btn){btn.disabled=false;btn.textContent='Envoyer';}toast('Impossible de joindre le fichier. Réessayez.');});
   };
-  window.GESCO_VERSION='2.3.111';
-  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';}catch(e){}
+  window.GESCO_VERSION='2.3.112';
+  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.112';}catch(e){}
 })();
 </script>
 
@@ -6857,7 +6945,7 @@ window.__ppServerReady = (function(){
 <script id="pp23104-circuit-bulletins">
 (function(){
  'use strict';
- window.GESCO_VERSION='2.3.111';
+ window.GESCO_VERSION='2.3.112';
  function norm(v){return String(v==null?'':v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/\s+/g,' ')}
  function safe(v){return typeof esc==='function'?esc(String(v==null?'':v)):String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
  function parentClasses(p){return (window.__ppClassListReliable?window.__ppClassListReliable(p):[]).filter(Boolean)}
@@ -6885,7 +6973,7 @@ window.__ppServerReady = (function(){
      html+='</div>';
      var mine=myRequests().filter(function(r){return String(r.parentId)===String(parent.id)}).slice().reverse();
      html+='<div class="panel"><h3>Mes demandes</h3>'+(mine.length?mine.map(function(r){var label=r.status==='sent'?'Bulletin transmis au professeur principal':r.status==='delivered'?'Bulletin transmis par le professeur principal aux parents':'En attente de traitement par l’administration';return '<div class="item"><b>'+safe(r.sequence)+' — '+safe(r.className)+'</b><p>'+safe(label)+'</p><small class="muted">Demande du '+safe(r.date||'')+'</small></div>'}).join(''):'<div class="empty">Vous n’avez pas encore demandé de bulletin.</div>')+'</div>';
-     var available=allBulls().filter(function(b){return b&&b.stage==='sentToParents'&&b.available!==false&&b.data&&parentHasClass(parent,b.className)&&myRequests().some(function(r){return String(r.parentId)===String(parent.id)&&String(r.id)===String(b.requestId)&&r.status==='delivered'});});
+     var available=allBulls().filter(function(b){return b&&b.stage==='sentToParents'&&b.available!==false&&(b.data||b.fileId)&&parentHasClass(parent,b.className)&&myRequests().some(function(r){return String(r.parentId)===String(parent.id)&&String(r.id)===String(b.requestId)&&r.status==='delivered'});});
      html+='<div class="panel"><h3>Bulletins transmis par le professeur principal</h3>'+(available.length?available.map(function(b){return '<div class="item"><b>'+safe(b.sequence)+' — '+safe(b.className)+'</b><p class="muted">'+safe(b.name||'Bulletin PDF')+' · '+safe(b.date||'')+'</p><button class="btn primary" onclick="portalDownloadBulletin('+Number(b.id)+')">Télécharger le bulletin PDF</button></div>'}).join(''):'<div class="empty">Aucun bulletin ne vous a encore été transmis.</div>')+'</div>';
    } else if(admin){
      var open=myRequests().filter(function(r){return r.status==='requested'});
@@ -6895,21 +6983,21 @@ window.__ppServerReady = (function(){
      else html+='<div class="field"><label>Demande du parent</label><select id="bpRequest">'+open.map(function(r){return '<option value="'+safe(r.id)+'">'+safe(r.className)+' — '+safe(r.sequence)+' — '+safe(parentLabel(r.parentId))+'</option>'}).join('')+'</select></div><div class="field"><label>Fichier PDF officiel</label><input id="bpFile" type="file" accept=".pdf,application/pdf"><small class="muted">PDF uniquement, maximum 1,8 Mo.</small></div><button class="btn primary" onclick="portalImportBulletin()">Importer et envoyer au professeur principal</button>';
      html+='</div>';
      var sent=allBulls().filter(function(b){return b&&b.stage==='toPrincipal'&&b.available!==false});
-     html+='<div class="panel"><h3>Bulletins transmis aux professeurs principaux</h3>'+(sent.length?sent.map(function(b){var t=(state.teachers||[]).find(function(x){return String(x.id)===String(b.principalTeacherId)});return '<div class="item"><b>'+safe(b.sequence)+' — '+safe(b.className)+'</b><p>Destinataire : '+safe(t&&t.name||'Professeur principal')+'</p><p class="muted">En attente de transmission aux parents</p></div>'}).join(''):'<div class="empty">Aucun bulletin en attente chez un professeur principal.</div>')+'</div>';
+     html+='<div class="panel"><h3>Bulletins transmis aux professeurs principaux</h3>'+(sent.length?sent.map(function(b){var t=(state.teachers||[]).find(function(x){return String(x.id)===String(b.principalTeacherId)});return '<div class="item"><b>'+safe(b.sequence)+' — '+safe(b.className)+'</b><p>Destinataire : '+safe(t&&t.name||'Professeur principal')+'</p><p class="muted">'+(b.kind==='class'?'Bulletin de classe remis au professeur principal':'En attente de transmission aux parents')+'</p></div>'}).join(''):'<div class="empty">Aucun bulletin en attente chez un professeur principal.</div>')+'</div>';
    } else if(teacher){
      var cls=teacherClasses(currentTeacher()),received=allBulls().filter(function(b){return b&&b.stage==='toPrincipal'&&String(b.principalTeacherId)===String(currentTeacher()&&currentTeacher().id)&&b.available!==false});
-     html+='<div class="panel"><h3>Bulletins reçus de l’administration</h3><p class="muted">Transmettez chaque bulletin au parent qui a demandé ce bulletin, après avoir vérifié le PDF et l’identité de l’élève.</p>'+(received.length?received.map(function(b){var r=reqForBulletin(b);return '<div class="item"><b>'+safe(b.sequence)+' — '+safe(b.className)+'</b><p class="muted">'+safe(b.name||'Bulletin PDF')+' · reçu le '+safe(b.date||'')+'</p><p>Demande initiale : '+safe(r?parentLabel(r.parentId):'Parent')+'</p><button class="btn secondary" onclick="portalPreviewPrincipalBulletin('+Number(b.id)+')">Télécharger / vérifier le PDF</button> <button class="btn primary" onclick="portalForwardBulletin('+Number(b.id)+')">Transmettre au parent demandeur</button></div>'}).join(''):'<div class="empty">Aucun bulletin ne vous a été transmis par l’administration.</div>')+'</div>';
+     html+='<div class="panel"><h3>Bulletins reçus de l’administration</h3><p class="muted">Transmettez chaque bulletin au parent qui a demandé ce bulletin, après avoir vérifié le PDF et l’identité de l’élève.</p>'+(received.length?received.map(function(b){var r=reqForBulletin(b);return '<div class="item"><b>'+safe(b.sequence)+' — '+safe(b.className)+'</b><p class="muted">'+safe(b.name||'Bulletin PDF')+' · reçu le '+safe(b.date||'')+'</p>'+(b.kind==='class'?'<p>Bulletins de toute la classe : à remettre aux élèves ou à leurs parents.</p><button class="btn primary" onclick="portalPreviewPrincipalBulletin('+Number(b.id)+')">Télécharger le PDF de la classe</button>':'<p>Demande initiale : '+safe(r?parentLabel(r.parentId):'Parent')+'</p><button class="btn secondary" onclick="portalPreviewPrincipalBulletin('+Number(b.id)+')">Télécharger / vérifier le PDF</button> <button class="btn primary" onclick="portalForwardBulletin('+Number(b.id)+')">Transmettre au parent demandeur</button>')+'</div>'}).join(''):'<div class="empty">Aucun bulletin ne vous a été transmis par l’administration.</div>')+'</div>';
      html+='<div class="panel"><h3>Mes classes principales</h3><p>'+(cls.length?cls.map(safe).join(', '):'Aucune classe principale affectée à ce compte.')+'</p></div>';
    }
    return html;
  };
  window.portalRequestBulletin=function(){if(!requireSession())return;var p=currentParent(),cf=document.getElementById('brClass'),sf=document.getElementById('brSeq');if(!p||!cf||!sf)return toast('Compte parent ou classe introuvable');var c=cf.value,seq=sf.value;if(!parentHasClass(p,c))return toast('Vous ne pouvez demander un bulletin que pour la classe de votre enfant');var duplicate=myRequests().find(function(r){return String(r.parentId)===String(p.id)&&norm(r.className)===norm(c)&&norm(r.sequence)===norm(seq)&&r.status!=='delivered'});if(duplicate)return toast('Une demande identique est déjà en cours');var child=(p.children||[]).find(function(x){return x&&typeof x==='object'&&norm(x.className||x.classe||x.class)===norm(c)});var rec={id:Date.now(),parentId:p.id,parentName:p.name,className:c,sequence:seq,childName:child?child.name:(p.student||''),date:nowStr(),status:'requested'};myRequests().push(rec);if(typeof markLocalChange==='function')markLocalChange();state.messages=Array.isArray(state.messages)?state.messages:[];var msg={id:Date.now()+1,from:p.name||'Parent',to:'Administration',subject:'Demande de bulletin séquentiel — '+c+' — '+seq,body:'Je demande la transmission du bulletin séquentiel de '+seq+' pour la classe '+c+(rec.childName?' concernant '+rec.childName:'')+'. Merci de le transmettre au professeur principal de cette classe.',date:nowStr(),read:false,readBy:{},deliveryStatus:'queued',sentAt:null,deliveredAt:null,readAt:null,attach:null,voice:null,parentId:p.id,recipientId:null,recipientRole:'admin',senderId:p.id,senderRole:'parent',group:null,bulletinRequestId:rec.id};state.messages.push(msg);if(!save()){myRequests().pop();state.messages=state.messages.filter(function(m){return String(m.id)!==String(msg.id)});return toast('La demande n’a pas pu être enregistrée');}window.__ppRecordBulletinEvent('demande_parent',{requestId:rec.id,parentId:p.id,className:c,sequence:seq,details:'Demande envoyée à l’administration'});try{if(typeof publishMessageToServer==='function')Promise.resolve(publishMessageToServer(msg)).catch(function(){});}catch(e){}try{if(typeof logActivity==='function')logActivity('Demande de bulletin',c+' — '+seq+' — '+(p.name||''));if(typeof pushNotif==='function')pushNotif('Demande de bulletin reçue : '+c+' — '+seq,'info','bulletin-request',rec.id)}catch(e){}render();toast('Demande envoyée à l’administration');};
- window.portalImportBulletin=function(){if(!requireSession()||!isAdmin())return toast('Import réservé à l’administration');var reqField=document.getElementById('bpRequest'),input=document.getElementById('bpFile'),req=myRequests().find(function(r){return reqField&&String(r.id)===String(reqField.value)&&r.status==='requested'}),file=input&&input.files&&input.files[0];if(!req)return toast('Sélectionnez une demande parent en attente');if(!file)return toast('Choisissez le PDF officiel');if(file.type!=='application/pdf'&&!/\.pdf$/i.test(file.name))return toast('Le fichier doit être un PDF');if(file.size>1.8*1024*1024)return toast('PDF trop volumineux : maximum 1,8 Mo');var principal=principalForClass(req.className);if(!principal)return toast('Aucun professeur principal n’est affecté à '+req.className+'. Affectez-en un avant la transmission.');var reader=new FileReader();reader.onerror=function(){toast('Lecture du PDF impossible. Réessayez.')};reader.onload=function(){var rec={id:Date.now(),className:req.className,sequence:req.sequence,name:file.name,data:String(reader.result||''),date:todayStr(),type:'sequentiel',available:true,stage:'toPrincipal',requestId:req.id,requestedByParentId:req.parentId,principalTeacherId:principal.id,importedBy:'admin'};if(!rec.data)return toast('Le PDF n’a pas pu être lu');allBulls().push(rec);if(typeof markLocalChange==='function')markLocalChange();req.status='sent';req.bulletinId=rec.id;req.sentToPrincipalAt=nowStr();if(!save()){allBulls().pop();req.status='requested';delete req.bulletinId;return toast('Stockage insuffisant : le bulletin n’a pas été transmis')};window.__ppRecordBulletinEvent('transmis_au_professeur_principal',{bulletinId:rec.id,requestId:req.id,parentId:req.parentId,teacherId:principal.id,className:rec.className,sequence:rec.sequence,details:'PDF importé par l’administration et transmis au professeur principal'});try{if(typeof logActivity==='function')logActivity('Bulletin transmis au professeur principal',rec.className+' — '+rec.sequence+' — '+principal.name);if(typeof pushNotif==='function')pushNotif('Bulletin à transmettre aux parents : '+rec.className+' — '+rec.sequence,'info','bulletin',rec.id)}catch(e){}render();toast('Bulletin transmis au professeur principal '+principal.name+'. Il doit maintenant le distribuer aux parents.');};reader.readAsDataURL(file);};
- window.portalPreviewPrincipalBulletin=function(id){var b=allBulls().find(function(x){return String(x.id)===String(id)}),t=currentTeacher();if(!b||!t||String(b.principalTeacherId)!==String(t.id)||b.stage!=='toPrincipal')return toast('Accès refusé');var a=document.createElement('a');a.href=b.data;a.download=(b.name||'Bulletin.pdf').replace(/[\\/:*?"<>|]/g,'_');document.body.appendChild(a);a.click();a.remove();};
+ window.portalImportBulletin=function(){if(!requireSession()||!isAdmin())return toast('Import réservé à l’administration');var reqField=document.getElementById('bpRequest'),input=document.getElementById('bpFile'),req=myRequests().find(function(r){return reqField&&String(r.id)===String(reqField.value)&&r.status==='requested'}),file=input&&input.files&&input.files[0];if(!req)return toast('Sélectionnez une demande parent en attente');if(!file)return toast('Choisissez le PDF officiel');if(file.type!=='application/pdf'&&!/\.pdf$/i.test(file.name))return toast('Le fichier doit être un PDF');var principal=principalForClass(req.className);if(!principal)return toast('Aucun professeur principal n’est affecté à '+req.className+'. Affectez-en un avant la transmission.');ppStoreBulletinFile(file).catch(function(e){toast(e.message||'Lecture du PDF impossible. Réessayez.');return null}).then(function(stored){if(!stored)return;var rec={id:Date.now(),className:req.className,sequence:req.sequence,name:file.name,data:stored.data,fileId:stored.fileId,date:todayStr(),type:'sequentiel',available:true,stage:'toPrincipal',requestId:req.id,requestedByParentId:req.parentId,principalTeacherId:principal.id,importedBy:'admin'};if(!rec.data&&!rec.fileId)return toast('Le PDF n’a pas pu être lu');allBulls().push(rec);if(typeof markLocalChange==='function')markLocalChange();req.status='sent';req.bulletinId=rec.id;req.sentToPrincipalAt=nowStr();if(!save()){allBulls().pop();req.status='requested';delete req.bulletinId;return toast('Stockage insuffisant : le bulletin n’a pas été transmis')};window.__ppRecordBulletinEvent('transmis_au_professeur_principal',{bulletinId:rec.id,requestId:req.id,parentId:req.parentId,teacherId:principal.id,className:rec.className,sequence:rec.sequence,details:'PDF importé par l’administration et transmis au professeur principal'});try{if(typeof logActivity==='function')logActivity('Bulletin transmis au professeur principal',rec.className+' — '+rec.sequence+' — '+principal.name);if(typeof pushNotif==='function')pushNotif('Bulletin à transmettre aux parents : '+rec.className+' — '+rec.sequence,'info','bulletin',rec.id)}catch(e){}render();toast('Bulletin transmis au professeur principal '+principal.name+'. Il doit maintenant le distribuer aux parents.');});};
+ window.portalPreviewPrincipalBulletin=function(id){var b=allBulls().find(function(x){return String(x.id)===String(id)}),t=currentTeacher();if(!b||!t||String(b.principalTeacherId)!==String(t.id)||b.stage!=='toPrincipal')return toast('Accès refusé');ppDownloadBulletinFile(b);};
  window.portalForwardBulletin=function(id){if(!requireSession()||!isTeacher()||isSupervisor())return toast('Action réservée au professeur principal');var t=currentTeacher(),b=allBulls().find(function(x){return String(x.id)===String(id)});if(!t||!b||String(b.principalTeacherId)!==String(t.id)||b.stage!=='toPrincipal')return toast('Ce bulletin ne vous est pas destiné ou a déjà été transmis');if(!teacherClasses(t).some(function(c){return norm(c)===norm(b.className)}))return toast('Vous n’êtes pas le professeur principal de cette classe');var r=reqForBulletin(b);if(!r)return toast('Demande d’origine introuvable : transmission bloquée');b.stage='sentToParents';b.forwardedAt=nowStr();b.forwardedBy=t.id;r.status='delivered';if(typeof markLocalChange==='function')markLocalChange();r.deliveredAt=nowStr();if(!save()){b.stage='toPrincipal';delete b.forwardedAt;delete b.forwardedBy;r.status='sent';delete r.deliveredAt;return toast('Transmission non enregistrée. Réessayez.')};window.__ppRecordBulletinEvent('transmis_au_parent',{bulletinId:b.id,requestId:r.id,parentId:r.parentId,teacherId:t.id,className:b.className,sequence:b.sequence,details:'Transmission au parent demandeur'});try{if(typeof publishMessageToServer==='function'){var recipient=(state.parents||[]).find(function(p){return String(p.id)===String(r.parentId)});var msg={id:Date.now()+2,from:t.name||'Professeur principal',to:recipient&&recipient.name||'Parent',subject:'Bulletin séquentiel disponible — '+b.className+' — '+b.sequence,body:'Le bulletin demandé pour '+(r.childName||'votre enfant')+' est disponible dans votre espace Bulletins. Vous pouvez le télécharger depuis votre compte.',date:nowStr(),read:false,readBy:{},deliveryStatus:'queued',sentAt:null,deliveredAt:null,readAt:null,attach:null,voice:null,parentId:r.parentId,recipientId:r.parentId,recipientRole:'parent',senderId:t.id,senderRole:'teacher',group:null,bulletinId:b.id,bulletinRequestId:r.id};state.messages=Array.isArray(state.messages)?state.messages:[];state.messages.push(msg);save();Promise.resolve(publishMessageToServer(msg)).catch(function(){});}}catch(e){}try{if(typeof logActivity==='function')logActivity('Bulletin transmis au parent demandeur',b.className+' — '+b.sequence+' — '+t.name);if(typeof pushNotif==='function')pushNotif('Le professeur principal a transmis le bulletin : '+b.className+' — '+b.sequence,'info','bulletin',b.id)}catch(e){}render();toast('Bulletin transmis au parent demandeur pour '+b.className+'.');};
- window.portalDownloadBulletin=function(id){var b=allBulls().find(function(x){return String(x.id)===String(id)});if(!b||!b.data||b.available===false)return toast('Bulletin indisponible');if(isAdmin())return toast('Le téléchargement par l’administration n’est pas proposé depuis cet écran.');if(isTeacher()){var t=currentTeacher();if(!t||String(b.principalTeacherId)!==String(t.id)||b.stage!=='toPrincipal')return toast('Accès refusé : bulletin non destiné à votre compte');return window.portalPreviewPrincipalBulletin(id)}var p=currentParent();if(!p||b.stage!=='sentToParents'||!parentHasClass(p,b.className)||!myRequests().some(function(r){return String(r.parentId)===String(p.id)&&String(r.id)===String(b.requestId)&&r.status==='delivered'}))return toast('Accès refusé : le bulletin ne vous a pas été transmis');var a=document.createElement('a');a.href=b.data;a.download=(b.name||('Bulletin_'+b.className+'_'+b.sequence+'.pdf')).replace(/[\\/:*?"<>|]/g,'_');document.body.appendChild(a);a.click();a.remove();};
+ window.portalDownloadBulletin=function(id){var b=allBulls().find(function(x){return String(x.id)===String(id)});if(!b||!(b.data||b.fileId)||b.available===false)return toast('Bulletin indisponible');if(isAdmin())return toast('Le téléchargement par l’administration n’est pas proposé depuis cet écran.');if(isTeacher()){var t=currentTeacher();if(!t||String(b.principalTeacherId)!==String(t.id)||b.stage!=='toPrincipal')return toast('Accès refusé : bulletin non destiné à votre compte');return window.portalPreviewPrincipalBulletin(id)}var p=currentParent();if(!p||b.stage!=='sentToParents'||!parentHasClass(p,b.className)||!myRequests().some(function(r){return String(r.parentId)===String(p.id)&&String(r.id)===String(b.requestId)&&r.status==='delivered'}))return toast('Accès refusé : le bulletin ne vous a pas été transmis');ppDownloadBulletinFile(b,b.name||('Bulletin_'+b.className+'_'+b.sequence+'.pdf'));};
  window.portalDeleteClassBulletin=function(id){if(!requireSession()||!isAdmin())return toast('Suppression réservée à l’administration');if(!confirm('Supprimer ce bulletin officiel et son lien de transmission ?'))return;var old=allBulls().slice(),oldR=myRequests().map(function(r){return Object.assign({},r)});state.bulletins=allBulls().filter(function(b){return String(b.id)!==String(id)});myRequests().forEach(function(r){if(String(r.bulletinId)===String(id))r.status='requested';});if(!save()){state.bulletins=old;state.bulletinRequests=oldR;return toast('Suppression non enregistrée')};render();toast('Bulletin supprimé');};
- try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';if(typeof render==='function')render()}catch(e){console.error('V2.3.104 bulletin workflow',e)}
+ try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.112';if(typeof render==='function')render()}catch(e){console.error('V2.3.104 bulletin workflow',e)}
 })();
 </script>
 
@@ -6918,7 +7006,7 @@ window.__ppServerReady = (function(){
 <script id="pp23105-bulletin-audit">
 (function(){
  'use strict';
- window.GESCO_VERSION='2.3.111';
+ window.GESCO_VERSION='2.3.112';
  window.__ppRecordBulletinEvent=function(type,data){
    try{
      state.bulletinHistory=Array.isArray(state.bulletinHistory)?state.bulletinHistory:[];
@@ -6945,7 +7033,7 @@ window.__ppServerReady = (function(){
    }catch(e){}
    return html;
  };
- try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';if(typeof render==='function')render()}catch(e){}
+ try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.112';if(typeof render==='function')render()}catch(e){}
 })();
 </script>
 
@@ -6953,7 +7041,7 @@ window.__ppServerReady = (function(){
 <script id="pp23106-sync-bulletins">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.111';
+  window.GESCO_VERSION='2.3.112';
   function esc106(v){return typeof esc==='function'?esc(String(v==null?'':v)):String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
   function syncLabel(){
     var a=state&&state.api||{};
@@ -6982,7 +7070,7 @@ window.__ppServerReady = (function(){
     status+='</div>';
     return html+status;
   };
-  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';if(typeof render==='function')render()}catch(e){console.warn('V2.3.106',e)}
+  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.112';if(typeof render==='function')render()}catch(e){console.warn('V2.3.106',e)}
 })();
 </script>
 
@@ -6991,14 +7079,14 @@ window.__ppServerReady = (function(){
 <script id="pp23107-sync-dirty-bulletins">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.111';
+  window.GESCO_VERSION='2.3.112';
   try {
     if (typeof state !== 'undefined' && state && typeof state === 'object') {
       if (!Array.isArray(state.bulletinRequests)) state.bulletinRequests=[];
       if (!Array.isArray(state.bulletinHistory)) state.bulletinHistory=[];
     }
     var title=document.querySelector('title');
-    if(title) title.textContent='Portail Parents — V2.3.111';
+    if(title) title.textContent='Portail Parents — V2.3.112';
     if(typeof render==='function') render();
   } catch(e) { console.warn('V2.3.107 initialisation',e); }
 })();
@@ -7009,7 +7097,7 @@ window.__ppServerReady = (function(){
 <script id="pp23108-outbox-bulletins">
 (function(){
  'use strict';
- window.GESCO_VERSION='2.3.111';
+ window.GESCO_VERSION='2.3.112';
  function ensureQueue(){
    if(typeof state==='undefined'||!state||typeof state!=='object')return [];
    if(!Array.isArray(state.bulletinSyncQueue))state.bulletinSyncQueue=[];
@@ -7064,6 +7152,6 @@ window.__ppServerReady = (function(){
    }catch(e){}
    return html;
  };
- try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';if(typeof render==='function')render();}catch(e){}
+ try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.112';if(typeof render==='function')render();}catch(e){}
 })();
 </script>

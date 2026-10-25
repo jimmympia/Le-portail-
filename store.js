@@ -38,7 +38,10 @@ function fileStore(dir) {
       return null;
     },
     save(db) { current = db; schedule(); },
-    flush: () => schedule.flush()
+    flush: () => schedule.flush(),
+    async putFile(id, buf) { fs.mkdirSync(path.join(dir, 'files'), { recursive: true }); fs.writeFileSync(path.join(dir, 'files', id + '.bin'), buf); },
+    async getFile(id) { const f = path.join(dir, 'files', id + '.bin'); return fs.existsSync(f) ? fs.readFileSync(f) : null; },
+    async delFile(id) { try { fs.unlinkSync(path.join(dir, 'files', id + '.bin')); } catch (e) {} }
   };
 }
 
@@ -50,6 +53,7 @@ function pgStore(url) {
   const init = async () => {
     if (ready) return;
     await pool.query("CREATE TABLE IF NOT EXISTS pp_kv (key text PRIMARY KEY, value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())");
+    await pool.query("CREATE TABLE IF NOT EXISTS pp_files (id text PRIMARY KEY, data bytea NOT NULL, created_at timestamptz NOT NULL DEFAULT now())");
     ready = true;
   };
   const write = async () => {
@@ -66,7 +70,10 @@ function pgStore(url) {
       return r.rows[0] ? r.rows[0].value : null;
     },
     save(db) { current = db; schedule(); },
-    flush: () => schedule.flush()
+    flush: () => schedule.flush(),
+    async putFile(id, buf) { await init(); await pool.query("INSERT INTO pp_files(id,data) VALUES($1,$2) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data", [id, buf]); },
+    async getFile(id) { await init(); const r = await pool.query("SELECT data FROM pp_files WHERE id=$1", [id]); return r.rows[0] ? r.rows[0].data : null; },
+    async delFile(id) { await init(); await pool.query("DELETE FROM pp_files WHERE id=$1", [id]); }
   };
 }
 
