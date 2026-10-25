@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Portail Parents">
 <script>if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<title>Portail Parents — V2.3.112</title>
+<title>Portail Parents — V2.3.114</title>
 <style>
 *{box-sizing:border-box}
 :root{
@@ -135,6 +135,7 @@ h1,h2,h3,p{margin-top:0}.muted{color:var(--muted);font-size:14px}.field{margin:1
  .nav button[data-page="sms"]:before{content:"📱"}
  .nav button[data-page="affectations"]:before{content:"👥"}
  .nav button[data-page="classes"]:before{content:"☰"}
+ .nav button[data-page="subjects"]:before{content:"📘"}
  .nav button[data-page="activity"]:before{content:"📋"}
  .nav button[data-page="bloc2"]:before{content:"Ⅱ"}
  .nav button[data-page="controle"]:before{content:"🛠"}
@@ -1735,6 +1736,7 @@ function shell(){
         ${admin?`<button data-page="teachers" class="${page==="teachers"?"active":""}" onclick="go('teachers')" aria-label="Enseignants">Enseignants</button>`:""}
         ${admin?`<button data-page="sms" class="${page==="sms"?"active":""}" onclick="go('sms')" aria-label="SMS et WhatsApp">SMS / WhatsApp</button>`:""}
         ${admin?`<button data-page="classes" class="${page==="classes"?"active":""}" onclick="go('classes')" aria-label="Classes">Classes</button>`:""}
+        ${admin?`<button data-page="subjects" class="${page==="subjects"?"active":""}" onclick="go('subjects')" aria-label="Matières">Matières</button>`:""}
         ${admin?`<button data-page="activity" class="${page==="activity"?"active":""}" onclick="go('activity')" aria-label="Journal d'activité">Journal</button>`:""}
         ${admin?`<button data-page="bloc2" class="${page==="bloc2"?"active":""}" onclick="go('bloc2')" aria-label="Bloc 2">Bloc 2</button>`:""}
         ${admin?`<button data-page="controle" class="${page==="controle"?"active":""}" onclick="go('controle')" aria-label="Contrôle final">Contrôle final</button>`:""}
@@ -1770,6 +1772,7 @@ function view(){
   if (page === "notifications") return notifications();
   if (page === "parents") return parents();
   if (page === "classes") return classesView();
+  if (page === "subjects") return subjectsView();
   if (page === "search") return searchView();
   if (page === "events") return eventsView();
   if (page === "templates") return templatesView();
@@ -3663,6 +3666,113 @@ function deleteClass(i){
   save();
   toast("Classe supprimée");
   go("classes");
+}
+
+/* ========== MATIÈRES (admin) ========== */
+function subjectsView(){
+  if (!isAdmin()) return '<div class="empty">Accès réservé à l’administration.</div>';
+  if (!Array.isArray(state.subjects)) state.subjects = [];
+  var list = state.subjects;
+  var rows = list.map(function(s, i){
+    var usedTeachers = (state.teachers || []).filter(function(t){
+      return t && Array.isArray(t.subjects) && t.subjects.indexOf(s) !== -1;
+    }).length;
+    var usedGrades = (state.grades || []).filter(function(g){ return g && g.subject === s; }).length;
+    return '<div class="item">'
+      + '<div class="item-head"><b>' + esc(s) + '</b>'
+      + '<span class="badge">' + usedTeachers + ' enseignant(s) · ' + usedGrades + ' note(s)</span></div>'
+      + '<button type="button" class="btn secondary" onclick="renameSubject(' + i + ')">Modifier</button> '
+      + '<button type="button" class="btn danger" onclick="deleteSubject(' + i + ')">Supprimer</button>'
+      + '</div>';
+  }).join('') || empty();
+  return '<div class="panel-head">'
+    + '<div><h1>Matières</h1><p class="muted">Ajoutez, renommez ou supprimez les matières enseignées. Elles apparaissent ensuite dans les fiches enseignants et la saisie des notes.</p></div>'
+    + '<button type="button" class="btn primary" onclick="addSubjectPrompt()">Ajouter une matière</button>'
+    + '</div>'
+    + '<div class="panel"><div class="list">' + rows + '</div></div>'
+    + '<div class="panel" style="margin-top:12px"><h3>Nouvelle matière</h3>'
+    + '<div class="field"><label>Nom de la matière</label><input id="newSubjectName" placeholder="Ex. Mathématiques, Français…"></div>'
+    + '<button type="button" class="btn primary" onclick="addSubjectFromForm()">Enregistrer</button></div>';
+}
+
+function addSubjectPrompt(){
+  if (!isAdmin()) return toast('Accès administrateur requis');
+  var name = prompt('Nom de la nouvelle matière :');
+  if (name == null) return;
+  name = String(name).trim();
+  if (!name) return;
+  addSubjectByName(name);
+}
+
+function addSubjectFromForm(){
+  if (!isAdmin()) return toast('Accès administrateur requis');
+  var el = document.getElementById('newSubjectName');
+  var name = el ? String(el.value || '').trim() : '';
+  if (!name) return toast('Saisissez le nom de la matière');
+  if (addSubjectByName(name) && el) el.value = '';
+}
+
+function addSubjectByName(name){
+  if (!Array.isArray(state.subjects)) state.subjects = [];
+  var exists = state.subjects.some(function(s){ return String(s).trim().toLowerCase() === name.toLowerCase(); });
+  if (exists) { toast('Cette matière existe déjà'); return false; }
+  state.subjects.push(name);
+  try { if (typeof markLocalChange === 'function') markLocalChange(); } catch (e) {}
+  save();
+  try { if (typeof logActivity === 'function') logActivity('Matière ajoutée', name); } catch (e) {}
+  toast('Matière ajoutée : ' + name);
+  go('subjects');
+  return true;
+}
+
+function renameSubject(i){
+  if (!isAdmin()) return toast('Accès administrateur requis');
+  if (!Array.isArray(state.subjects) || i < 0 || i >= state.subjects.length) return;
+  var old = state.subjects[i];
+  var name = prompt('Nouveau nom de la matière :', old);
+  if (name == null) return;
+  name = String(name).trim();
+  if (!name) return;
+  if (state.subjects.some(function(s, idx){ return idx !== i && String(s).trim().toLowerCase() === name.toLowerCase(); })) {
+    return toast('Une matière porte déjà ce nom');
+  }
+  state.subjects[i] = name;
+  (state.teachers || []).forEach(function(t){
+    if (!t || !Array.isArray(t.subjects)) return;
+    t.subjects = t.subjects.map(function(s){ return s === old ? name : s; });
+  });
+  (state.grades || []).forEach(function(g){
+    if (g && g.subject === old) g.subject = name;
+  });
+  try { if (typeof markLocalChange === 'function') markLocalChange(); } catch (e) {}
+  save();
+  try { if (typeof logActivity === 'function') logActivity('Matière renommée', old + ' → ' + name); } catch (e) {}
+  toast('Matière renommée');
+  go('subjects');
+}
+
+function deleteSubject(i){
+  if (!isAdmin()) return toast('Accès administrateur requis');
+  if (!Array.isArray(state.subjects) || i < 0 || i >= state.subjects.length) return;
+  var s = state.subjects[i];
+  var usedTeachers = (state.teachers || []).filter(function(t){
+    return t && Array.isArray(t.subjects) && t.subjects.indexOf(s) !== -1;
+  });
+  var usedGrades = (state.grades || []).filter(function(g){ return g && g.subject === s; });
+  var msg = 'Supprimer la matière « ' + s + ' » ?';
+  if (usedTeachers.length || usedGrades.length) {
+    msg += '\n\nAttention : ' + usedTeachers.length + ' enseignant(s) et ' + usedGrades.length + ' note(s) y font référence. Les associations enseignants seront retirées.';
+  }
+  if (!confirm(msg)) return;
+  state.subjects.splice(i, 1);
+  usedTeachers.forEach(function(t){
+    t.subjects = (t.subjects || []).filter(function(x){ return x !== s; });
+  });
+  try { if (typeof markLocalChange === 'function') markLocalChange(); } catch (e) {}
+  save();
+  try { if (typeof logActivity === 'function') logActivity('Matière supprimée', s); } catch (e) {}
+  toast('Matière supprimée');
+  go('subjects');
 }
 
 /* ========== CALENDRIER / ÉVÉNEMENTS ========== */
@@ -7155,3 +7265,365 @@ window.__ppServerReady = (function(){
  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.112';if(typeof render==='function')render();}catch(e){}
 })();
 </script>
+
+<!-- V2.3.113 : messages surveillant → parents, convocation préenregistrée + date -->
+<script id="pp23113-supervisor-convocation">
+(function(){
+  'use strict';
+  window.GESCO_VERSION = '2.3.114';
+  function escH(v){
+    return typeof esc === 'function' ? esc(String(v == null ? '' : v)) : String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+  }
+  function norm(v){ return String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' '); }
+  function sgName(){
+    var sg = (typeof currentSupervisor === 'function' ? currentSupervisor() : null) || (state && state.supervisor) || {};
+    return (sg.name && String(sg.name).trim()) || 'Surveillant général';
+  }
+  function ensureConvocationTemplates(){
+    state.templates = Array.isArray(state.templates) ? state.templates : [];
+    var needed = [
+      { id: 101, title: 'Convocation parents', subject: 'Convocation — Entretien avec les parents', body: 'Madame, Monsieur,\n\nVous êtes convoqué(e) à un entretien concernant votre enfant, le {DATE} à {HEURE}, dans l’établissement.\n\nMerci de confirmer votre présence ou de nous contacter en cas d’empêchement.\n\nCordialement,\nLe Surveillant général' },
+      { id: 102, title: 'Convocation discipline', subject: 'Convocation — Suivi disciplinaire', body: 'Madame, Monsieur,\n\nSuite à un manquement au règlement intérieur, vous êtes convoqué(e) le {DATE} à {HEURE} pour un entretien disciplinaire concernant votre enfant.\n\nVotre présence est obligatoire.\n\nCordialement,\nLe Surveillant général' },
+      { id: 103, title: 'Absence / retard', subject: 'Information — Absences et retards', body: 'Madame, Monsieur,\n\nNous vous informons que des absences ou retards ont été constatés pour votre enfant. Merci de régulariser la situation auprès du service de vie scolaire.\n\nCordialement,\nLe Surveillant général' }
+    ];
+    needed.forEach(function(t){
+      if (!state.templates.some(function(x){ return x && (Number(x.id) === t.id || norm(x.title) === norm(t.title)); })) state.templates.push(t);
+    });
+  }
+  var priorMyLabel = window.myLabel;
+  window.myLabel = function(){
+    if (typeof isSupervisor === 'function' && isSupervisor()) return sgName();
+    return typeof priorMyLabel === 'function' ? priorMyLabel() : 'Utilisateur';
+  };
+  var priorVisible = window.visibleMessages;
+  window.visibleMessages = function(){
+    if (typeof isSupervisor === 'function' && isSupervisor()) {
+      var name = sgName();
+      return (state.messages || []).filter(function(m){
+        if (!m) return false;
+        var hay = [m.subject, m.body, m.category, m.topic].join(' ').toLowerCase();
+        return m.to === name || m.from === name || m.recipientRole === 'supervisor' || m.senderRole === 'supervisor' || String(m.senderId) === 'supervisor:1' || /absence|retard|disciplin|sanction|comportement|convocation/.test(hay);
+      });
+    }
+    var list = typeof priorVisible === 'function' ? priorVisible() : (state.messages || []).slice();
+    if (typeof isAdmin === 'function' && isAdmin()) return list;
+    if (typeof isTeacher === 'function' && isTeacher()) return list;
+    var p = typeof currentParent === 'function' ? currentParent() : null;
+    if (!p) return list;
+    var extra = (state.messages || []).filter(function(m){
+      if (!m) return false;
+      var forMe = String(m.parentId) === String(p.id) || (m.recipientRole === 'parent' && String(m.recipientId) === String(p.id)) || m.to === p.name;
+      var fromSg = m.senderRole === 'supervisor' || m.from === sgName() || String(m.from || '').toLowerCase().indexOf('surveillant') !== -1;
+      return forMe && fromSg;
+    });
+    var seen = {};
+    return list.concat(extra).filter(function(m){ var k = String(m.id); if (seen[k]) return false; seen[k] = true; return true; });
+  };
+  var priorNotifs = window.visibleNotifications;
+  if (typeof priorNotifs === 'function') {
+    window.visibleNotifications = function(){
+      var base = priorNotifs() || [];
+      var p = typeof currentParent === 'function' ? currentParent() : null;
+      if (!p) return base;
+      var extra = (state.notifications || []).filter(function(n){
+        if (!n || n.refType !== 'message' || !n.refId) return false;
+        var m = (state.messages || []).find(function(x){ return String(x.id) === String(n.refId); });
+        if (!m) return false;
+        var forMe = String(m.parentId) === String(p.id) || (m.recipientRole === 'parent' && String(m.recipientId) === String(p.id)) || m.to === p.name;
+        return forMe && (m.senderRole === 'supervisor' || String(m.from || '').toLowerCase().indexOf('surveillant') !== -1);
+      });
+      var seen = {};
+      return base.concat(extra).filter(function(n){ var k = String(n.id); if (seen[k]) return false; seen[k] = true; return true; });
+    };
+  }
+  function classesForParentLocal(p){
+    if (typeof window.__ppClassListReliable === 'function') return window.__ppClassListReliable(p) || [];
+    if (!p) return [];
+    var out = [];
+    (Array.isArray(p.children) ? p.children : []).forEach(function(c){ var v = typeof c === 'string' ? c : (c && (c.className || c.classe || c.class)); if (v) out.push(String(v)); });
+    if (p.className) out.push(String(p.className));
+    return Array.from(new Set(out.filter(Boolean)));
+  }
+  function buildRecipientOptions(){
+    var admin = isAdmin(), teacher = isTeacher(), supervisor = isSupervisor();
+    var parent = typeof currentParent === 'function' ? currentParent() : null;
+    var t = typeof currentTeacher === 'function' ? currentTeacher() : null;
+    var html = '';
+    function opt(label, value, id, kind){ return '<option value="' + escH(value) + '" data-id="' + escH(id == null ? '' : id) + '" data-kind="' + kind + '">' + escH(label) + '</option>'; }
+    if (admin) {
+      (state.parents || []).filter(function(p){ return p && p.active !== false && p.name; }).forEach(function(p){ html += opt(p.name + ' — ' + (classesForParentLocal(p).join(', ') || 'Classe non précisée'), p.name, p.id, 'parent'); });
+      (state.teachers || []).filter(function(x){ return x && x.active !== false && x.name; }).forEach(function(x){ html += opt(x.name + ' — Enseignant', x.name, x.id, 'teacher'); });
+    } else if (supervisor) {
+      (state.parents || []).filter(function(p){ return p && p.active !== false && p.name; }).forEach(function(p){ html += opt(p.name + ' — ' + (classesForParentLocal(p).join(', ') || 'Classe non précisée'), p.name, p.id, 'parent'); });
+      if (!html) html = '<option value="" disabled>Aucun compte parent actif</option>';
+    } else if (teacher) {
+      html += opt('Administration', 'Administration', '', 'admin');
+      var entries = typeof window.__ppPrincipalEntriesReliable === 'function' ? window.__ppPrincipalEntriesReliable() : [];
+      var cls = entries.filter(function(e){ return t && String(e.teacher.id) === String(t.id); }).map(function(e){ return e.cls; });
+      (state.parents || []).filter(function(p){ return p && p.active !== false && p.name && classesForParentLocal(p).some(function(c){ return cls.some(function(tc){ return norm(tc) === norm(c); }); }); }).forEach(function(p){
+        var relevant = classesForParentLocal(p).filter(function(c){ return cls.some(function(tc){ return norm(tc) === norm(c); }); });
+        html += opt(p.name + ' — ' + relevant.join(', '), p.name, p.id, 'parent');
+      });
+    } else if (parent) {
+      html += opt('Administration', 'Administration', '', 'admin');
+      var pclasses = classesForParentLocal(parent);
+      var ents = (typeof window.__ppPrincipalEntriesReliable === 'function' ? window.__ppPrincipalEntriesReliable() : []).filter(function(e){ return pclasses.some(function(c){ return norm(c) === norm(e.cls); }); });
+      var seen = {};
+      ents.forEach(function(e){ var id = String(e.teacher.id); if (!seen[id]) { seen[id] = true; html += opt('Professeur principal — ' + e.teacher.name + ' (' + e.cls + ')', e.teacher.name, e.teacher.id, 'teacher'); } });
+    }
+    return html;
+  }
+  function templateChips(forSupervisor){
+    ensureConvocationTemplates();
+    var list = (state.templates || []).filter(function(t){
+      if (!t) return false;
+      if (!forSupervisor) return true;
+      var k = norm(t.title + ' ' + (t.subject || ''));
+      return /convocation|absence|retard|disciplin|reunion|parents|entretien|information/.test(k) || Number(t.id) >= 100;
+    });
+    if (!list.length) list = state.templates || [];
+    if (!list.length) return '';
+    return '<div class="field"><label>Messages préenregistrés</label><div>' + list.map(function(t){ return '<span class="tpl-chip" data-tpl="' + Number(t.id) + '" role="button" tabindex="0">' + escH(t.title) + '</span>'; }).join('') + '</div></div>';
+  }
+  function convocationDateFields(){
+    return '<div class="field" id="convocationFields"><label>Date de la convocation</label><input type="date" id="convDate"></div><div class="field"><label>Heure (facultatif)</label><input type="time" id="convTime" value="09:00"></div>';
+  }
+  function applyTplById(id){
+    var t = (state.templates || []).find(function(x){ return Number(x.id) === Number(id); });
+    if (!t) return;
+    var sub = document.getElementById('sub');
+    var body = document.getElementById('body');
+    if (sub) sub.value = t.subject || '';
+    if (body) body.value = t.body || '';
+    var isConv = /convocation/i.test(String(t.title || '') + ' ' + String(t.subject || ''));
+    var box = document.getElementById('convocationFields');
+    if (box) box.style.display = isConv ? '' : 'none';
+    fillConvocationPlaceholders();
+    if (typeof toast === 'function') toast('Modèle appliqué : ' + t.title);
+  }
+  function fillConvocationPlaceholders(){
+    var body = document.getElementById('body');
+    if (!body) return;
+    var d = document.getElementById('convDate');
+    var tm = document.getElementById('convTime');
+    var dateLabel = '……', timeLabel = '……';
+    if (d && d.value) {
+      try { var parts = d.value.split('-'); dateLabel = parts.length === 3 ? parts[2] + '/' + parts[1] + '/' + parts[0] : d.value; } catch (e) { dateLabel = d.value; }
+    }
+    if (tm && tm.value) timeLabel = tm.value.replace(':', 'h');
+    var txt = body.value;
+    if (/{DATE}|\{HEURE\}/i.test(txt) || /……/.test(txt)) {
+      body.value = txt.replace(/\{DATE\}/gi, dateLabel).replace(/\{HEURE\}/gi, timeLabel);
+    }
+  }
+  window.applyTemplate = function(id){ applyTplById(id); };
+  window.compose = function(){
+    ensureConvocationTemplates();
+    var admin = isAdmin(), teacher = isTeacher(), supervisor = isSupervisor();
+    var target = window._communicationTarget || null;
+    var host = document.querySelector('.content');
+    if (!host) return;
+    var recipients = buildRecipientOptions();
+    var showTpl = admin || supervisor;
+    var help = admin ? 'Communication avec les comptes parents et enseignants.' : supervisor ? 'Absences, retards, discipline et convocations. Utilisez un message préenregistré et choisissez la date pour une convocation.' : teacher ? 'Écrivez à l’administration ou aux parents de votre classe de responsabilité.' : 'Écrivez à l’administration ou au professeur principal de votre enfant.';
+    host.innerHTML = '<div class="panel"><div class="panel-head"><div><h2>' + (target ? 'Conversation avec ' + escH(target.name) : 'Nouveau message') + '</h2><p class="muted">' + help + '</p></div><button type="button" class="btn secondary" id="btnBackMsg">Retour</button></div><div class="field"><label>Destinataire</label><select id="to"' + (target ? ' disabled' : '') + '>' + (recipients || '<option value="" disabled>Aucun destinataire disponible</option>') + '</select></div>' + (showTpl ? templateChips(supervisor) : '') + (supervisor || admin ? convocationDateFields() : '') + '<div class="field"><label>Objet</label><input id="sub" placeholder="Objet du message"></div><div class="field"><label>Message</label><textarea id="body" placeholder="Écrivez votre message..."></textarea></div><div class="field"><label>Pièce jointe (facultatif, max 2 Mo)</label><input id="attach" type="file"></div><div class="field"><label>Message vocal</label><div id="voiceControls"></div></div><button type="button" class="btn primary" id="btnSendMsg">Envoyer</button></div>';
+    var back = document.getElementById('btnBackMsg');
+    if (back) back.onclick = function(){ if (typeof go === 'function') go('messages'); };
+    var send = document.getElementById('btnSendMsg');
+    if (send) send.onclick = function(){ window.sendMsg(); };
+    host.querySelectorAll('.tpl-chip[data-tpl]').forEach(function(chip){
+      chip.addEventListener('click', function(){ applyTplById(chip.getAttribute('data-tpl')); });
+    });
+    var d = document.getElementById('convDate');
+    var tm = document.getElementById('convTime');
+    if (d) d.addEventListener('change', fillConvocationPlaceholders);
+    if (tm) tm.addEventListener('change', fillConvocationPlaceholders);
+    var box = document.getElementById('convocationFields');
+    if (box && supervisor) box.style.display = 'none';
+    try { if (typeof mountVoiceControls === 'function') mountVoiceControls(); } catch (e) {}
+  };
+  window.sendMsg = function(){
+    if (typeof requireSession === 'function' && !requireSession()) return;
+    var subEl = document.getElementById('sub'), bodyEl = document.getElementById('body'), sel = document.getElementById('to');
+    var sub = ((subEl && subEl.value) || '').trim();
+    var body = ((bodyEl && bodyEl.value) || '').trim();
+    if (!sub || !body) return toast('Veuillez remplir l’objet et le message');
+    if (!sel || sel.selectedIndex < 0 || !sel.options.length) return toast('Choisissez un destinataire');
+    var opt = sel.options[sel.selectedIndex];
+    if (!opt || opt.disabled || !opt.value) return toast('Choisissez un destinataire valide');
+    fillConvocationPlaceholders();
+    body = ((bodyEl && bodyEl.value) || '').trim();
+    var isConv = /convocation/i.test(sub + ' ' + body);
+    var d = document.getElementById('convDate');
+    if (isConv && d && !d.value) return toast('Sélectionnez la date de la convocation');
+    if (isConv && d && d.value) {
+      var parts = d.value.split('-');
+      var dateFr = parts.length === 3 ? (parts[2] + '/' + parts[1] + '/' + parts[0]) : d.value;
+      if (body.indexOf(dateFr) === -1 && body.indexOf(d.value) === -1) {
+        body += '\n\nDate de convocation : ' + dateFr;
+        var tm = document.getElementById('convTime');
+        if (tm && tm.value) body += ' à ' + tm.value.replace(':', 'h');
+        if (bodyEl) bodyEl.value = body;
+      }
+    }
+    var kind = (opt.dataset && opt.dataset.kind) || '';
+    var id = (opt.dataset && opt.dataset.id) || '';
+    var admin = isAdmin(), teacher = isTeacher(), supervisor = isSupervisor();
+    var parent = typeof currentParent === 'function' ? currentParent() : null;
+    var t = typeof currentTeacher === 'function' ? currentTeacher() : null;
+    if (supervisor && kind !== 'parent') return toast('Le surveillant peut uniquement écrire aux parents.');
+    if (!admin && !teacher && !supervisor && !parent) return toast('Compte introuvable. Reconnectez-vous.');
+    var toLabel = kind === 'admin' ? 'Administration' : opt.value;
+    var recipientId = (kind === 'admin' || !id) ? null : (isNaN(Number(id)) ? id : Number(id));
+    var parentId = kind === 'parent' ? (isNaN(Number(id)) ? id : Number(id)) : (parent ? parent.id : null);
+    var senderId = admin ? 'admin' : (supervisor ? 'supervisor:1' : (teacher ? (t && t.id) : (parent && parent.id)));
+    var senderRole = admin ? 'admin' : (supervisor ? 'supervisor' : (teacher ? 'teacher' : 'parent'));
+    var fromLabel = typeof myLabel === 'function' ? myLabel() : (supervisor ? sgName() : 'Utilisateur');
+    var btn = document.getElementById('btnSendMsg') || document.querySelector('.content .btn.primary');
+    if (btn) { btn.disabled = true; btn.textContent = 'Envoi…'; }
+    var read = typeof readAttachment === 'function' ? readAttachment(document.getElementById('attach')) : Promise.resolve(null);
+    Promise.resolve(read).then(function(attach){
+      var msg = { id: Date.now(), from: fromLabel, to: toLabel, subject: sub, body: body, date: typeof nowStr === 'function' ? nowStr() : new Date().toLocaleString('fr-FR'), read: false, readBy: {}, deliveryStatus: 'queued', sentAt: null, deliveredAt: null, readAt: null, attach: attach || null, voice: window._gescoVoiceAttachment || null, parentId: parentId, recipientId: recipientId, recipientRole: kind || (parentId != null ? 'parent' : 'admin'), senderId: senderId, senderRole: senderRole, group: null, category: isConv ? 'convocation' : (supervisor ? 'vie_scolaire' : null), convocationDate: (d && d.value) || null, convocationTime: ((document.getElementById('convTime') || {}).value) || null };
+      state.messages = Array.isArray(state.messages) ? state.messages : [];
+      state.messages.push(msg);
+      window._gescoVoiceAttachment = null;
+      try { if (typeof logActivity === 'function') logActivity('Message envoyé', sub + ' → ' + toLabel); if (typeof pushNotif === 'function') pushNotif('Nouveau message : ' + sub + ' — ' + toLabel, 'message', 'message', msg.id); } catch (e) {}
+      try { if ((admin || teacher || supervisor) && parentId) { if (typeof triggerAutoSMS === 'function') triggerAutoSMS('message', { parentId: parentId, subject: sub }); if (typeof triggerAutoWhatsApp === 'function') triggerAutoWhatsApp('message', { parentId: parentId, subject: sub, fullBody: body }); } } catch (e) {}
+      if (typeof save === 'function') save(false);
+      try { if (typeof publishMessageToServer === 'function') Promise.resolve(publishMessageToServer(msg)).then(function(ok){ if (ok) { msg.sentAt = typeof nowStr === 'function' ? nowStr() : new Date().toLocaleString('fr-FR'); if (typeof save === 'function') save(false); } }).catch(function(){}); } catch (e) {}
+      toast('Message envoyé à ' + toLabel);
+      if (typeof go === 'function') go('messages');
+    }).catch(function(){ if (btn) { btn.disabled = false; btn.textContent = 'Envoyer'; } toast('Impossible de joindre le fichier. Réessayez.'); });
+  };
+  window.composeConvocation = function(){
+    if (typeof isSupervisor === 'function' && !isSupervisor() && typeof isAdmin === 'function' && !isAdmin()) return toast('Réservé au surveillant général ou à l’administration');
+    window.compose();
+    setTimeout(function(){
+      ensureConvocationTemplates();
+      var t = (state.templates || []).find(function(x){ return x && Number(x.id) === 101; }) || (state.templates || []).find(function(x){ return x && /convocation/i.test(x.title || ''); });
+      if (t) applyTplById(t.id);
+      var box = document.getElementById('convocationFields');
+      if (box) box.style.display = '';
+    }, 30);
+  };
+  var priorRender = window.render;
+  if (typeof priorRender === 'function') {
+    window.render = function(){
+      var r = priorRender.apply(this, arguments);
+      try {
+        if ((isSupervisor() || isAdmin()) && (typeof page !== 'undefined') && (page === 'messages' || page === 'communication')) {
+          var content = document.querySelector('.content');
+          if (content && !document.getElementById('btnConvocationParents')) {
+            var bar = document.createElement('div');
+            bar.style.cssText = 'margin:0 0 12px;display:flex;gap:8px;flex-wrap:wrap';
+            bar.innerHTML = '<button type="button" class="btn primary" id="btnConvocationParents">📋 Convocation des parents</button><button type="button" class="btn secondary" id="btnNewMsgFixed">✉️ Nouveau message</button>';
+            content.insertBefore(bar, content.firstChild);
+            document.getElementById('btnConvocationParents').onclick = function(){ window.composeConvocation(); };
+            document.getElementById('btnNewMsgFixed').onclick = function(){ window.compose(); };
+          }
+        }
+      } catch (e) {}
+      return r;
+    };
+  }
+  try { ensureConvocationTemplates(); var title = document.querySelector('title'); if (title) title.textContent = 'Portail Parents — V2.3.114'; } catch (e) { console.warn('V2.3.113', e); }
+})();
+</script>
+
+<!-- V2.3.114 : gestion des matières (admin) — menu forcé -->
+<script id="pp23114-subjects-admin">
+(function(){
+  'use strict';
+  window.GESCO_VERSION = '2.3.114';
+
+  if (typeof state !== 'undefined' && state && (!Array.isArray(state.subjects) || !state.subjects.length)) {
+    state.subjects = ["Mathématiques","Français","Anglais","Histoire-Géo","SVT","Physique-Chimie","EPS","Informatique","Philosophie"];
+  }
+
+  var priorView = window.view;
+  if (typeof priorView === 'function') {
+    window.view = function(){
+      if (typeof page !== 'undefined' && page === 'subjects') {
+        return typeof subjectsView === 'function' ? subjectsView() : '<div class="empty">Module matières indisponible.</div>';
+      }
+      return priorView.apply(this, arguments);
+    };
+  }
+
+  var priorAccess = window.canAccessPage;
+  if (typeof priorAccess === 'function') {
+    window.canAccessPage = function(p){
+      if (p === 'subjects') return typeof isAdmin === 'function' && isAdmin();
+      return priorAccess(p);
+    };
+  }
+
+  function injectSubjectsNav(){
+    try {
+      if (typeof isAdmin !== 'function' || !isAdmin()) return;
+      if (document.querySelector('.nav button[data-page="subjects"]')) return;
+      var nav = document.querySelector('.nav');
+      if (!nav) return;
+      var classesBtn = nav.querySelector('button[data-page="classes"]');
+      var btn = document.createElement('button');
+      btn.setAttribute('data-page', 'subjects');
+      btn.setAttribute('aria-label', 'Matières');
+      btn.type = 'button';
+      if (typeof page !== 'undefined' && page === 'subjects') btn.className = 'active';
+      btn.textContent = 'Matières';
+      btn.onclick = function(){ if (typeof go === 'function') go('subjects'); };
+      if (classesBtn && classesBtn.nextSibling) {
+        classesBtn.parentNode.insertBefore(btn, classesBtn.nextSibling);
+      } else if (classesBtn) {
+        classesBtn.parentNode.appendChild(btn);
+      } else {
+        var teachersBtn = nav.querySelector('button[data-page="teachers"]');
+        if (teachersBtn && teachersBtn.nextSibling) teachersBtn.parentNode.insertBefore(btn, teachersBtn.nextSibling);
+        else nav.appendChild(btn);
+      }
+    } catch (e) { console.warn('injectSubjectsNav', e); }
+  }
+
+  var priorShell = window.shell;
+  if (typeof priorShell === 'function') {
+    window.shell = function(){
+      var h = priorShell.apply(this, arguments);
+      if (typeof isAdmin === 'function' && isAdmin() && h.indexOf('data-page="subjects"') === -1) {
+        var needle = 'data-page="classes"';
+        var i = h.indexOf(needle);
+        if (i !== -1) {
+          var close = h.indexOf('</button>', i);
+          if (close !== -1) {
+            var insert = '</button>\n        <button data-page="subjects" class="' + (typeof page !== 'undefined' && page === 'subjects' ? 'active' : '') + '" onclick="go(\'subjects\')" aria-label="Matières">Matières</button>';
+            h = h.slice(0, close) + insert + h.slice(close + '</button>'.length);
+          }
+        }
+      }
+      return h;
+    };
+  }
+
+  var priorRender = window.render;
+  if (typeof priorRender === 'function') {
+    window.render = function(){
+      var r = priorRender.apply(this, arguments);
+      setTimeout(injectSubjectsNav, 0);
+      setTimeout(injectSubjectsNav, 100);
+      return r;
+    };
+  }
+
+  // Au cas où render a déjà tourné
+  document.addEventListener('DOMContentLoaded', function(){ setTimeout(injectSubjectsNav, 200); });
+  window.addEventListener('load', function(){ setTimeout(injectSubjectsNav, 400); });
+  setInterval(function(){
+    if (typeof isAdmin === 'function' && isAdmin() && !document.querySelector('.nav button[data-page="subjects"]')) injectSubjectsNav();
+  }, 1500);
+
+  try {
+    var title = document.querySelector('title');
+    if (title) title.textContent = 'Portail Parents — V2.3.114';
+  } catch (e) {}
+})();
+</script>
+
