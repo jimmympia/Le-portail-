@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Portail Parents">
 <script>if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<title>Portail Parents — V2.3.110</title>
+<title>Portail Parents — V2.3.111</title>
 <style>
 *{box-sizing:border-box}
 :root{
@@ -137,9 +137,9 @@ h1,h2,h3,p{margin-top:0}.muted{color:var(--muted);font-size:14px}.field{margin:1
  .nav button[data-page="classes"]:before{content:"☰"}
  .nav button[data-page="activity"]:before{content:"📋"}
  .nav button[data-page="bloc2"]:before{content:"Ⅱ"}
- .nav button[data-page="controle"]:before{content:"✓"}
- .nav button[data-page="bloc3"]:before{content:"Ⅲ"}
- .nav button[data-page="profil"]:before{content:"●"}
+ .nav button[data-page="controle"]:before{content:"🛠"}
+ .nav button[data-page="bloc3"]:before{content:"🗂"}
+ .nav button[data-page="profil"]:before{content:"👤"}
  .nav .badge-count{right:2px;top:4px;transform:none;min-width:17px;height:17px;font-size:10px}
  .logout{font-size:0!important;text-align:center;padding:12px 6px;min-height:46px;flex-shrink:0}
  .logout:before{content:"↪";font-size:20px;display:inline-block;line-height:1.2}
@@ -1721,7 +1721,7 @@ function shell(){
   let un = unreadNotifs();
   return `<div class="layout">
     <aside class="side">
-      <div class="brand"><img class="brand-logo" src="${LOGO_DATA_URL}" alt="Logo CST"><span class="brand-text">Portail Parents</span><span class="version-tag">v2.3.110</span></div>
+      <div class="brand"><img class="brand-logo" src="${LOGO_DATA_URL}" alt="Logo CST"><span class="brand-text">Portail Parents</span><span class="version-tag">v2.3.111</span></div>
       <nav class="nav">
         <button data-page="home" class="${page==="home"?"active":""}" onclick="go('home')" aria-label="Accueil">Accueil</button>
         <button data-page="communication" class="${page==="communication"?"active":""}" onclick="go('communication')" aria-label="Communication">Communication</button>
@@ -2063,8 +2063,7 @@ function home(){
 
   return '<h1>Bonjour ' + esc(myProfile().name || (admin ? "Administrateur" : (teacher ? "Enseignant" : "Parent"))) + ' 👋</h1>'
     + '<p class="muted">Collège Saint Thomas de Manjo — Espace communication</p>'
-    + (admin ? '<p class="muted" style="font-size:12px">Mode téléphone : ce compte fonctionne localement sur ce téléphone. Lorsque le serveur central sera configuré, les données pourront être synchronisées entre les téléphones de l’administration, des enseignants et des parents.</p>' : '')
-    + (admin ? '<div class="panel" style="margin-top:12px"><div class="panel-head"><h3>🧪 Contrôle téléphone</h3></div><p class="muted">Vérification rapide des fonctions essentielles, du stockage local et des erreurs JavaScript.</p><button class="btn secondary" onclick="runMobileAudit()">Lancer le contrôle</button><div id="mobileAuditResult" style="margin-top:10px"></div></div>' : '')
+    + ppSyncCard()
     + parentAlert
     + '<div class="panel"><div class="panel-head"><h3>Actions rapides</h3></div>'
     + '<button class="btn primary" onclick="compose()">✉ Nouveau message</button>'
@@ -5330,11 +5329,11 @@ function saveProfile(){
   }
 }
 
-/* ===== 2.3.110 — stat() manquante (pages Communication, Bloc 2, Contrôle, Bloc 3) ===== */
+/* ===== 2.3.111 — stat() manquante (pages Communication, Bloc 2, Contrôle, Bloc 3) ===== */
 function stat(label, value, icon){
   return '<div class="stat-card"><div class="label">' + (icon ? icon + ' ' : '') + esc(String(label)) + '</div><div class="value">' + esc(String(value == null ? 0 : value)) + '</div></div>';
 }
-/* ===== 2.3.110 — mot de passe provisoire : changement obligatoire ===== */
+/* ===== 2.3.111 — mot de passe provisoire : changement obligatoire ===== */
 function mustChangeFor(userVal){
   try{
     if (state.api && state.api.sessionToken) return false;
@@ -5367,6 +5366,16 @@ function showForcedPasswordChange(userVal){
       toast("Mot de passe enregistré");
     });
   };
+}
+
+/* ===== 2.3.111 — carte de synchronisation (accueil) ===== */
+function ppSyncCard(){
+  var a = state.api || {}, on = !!(a.enabled && a.baseUrl && a.sessionToken), txt;
+  if (on) txt = a.lastSyncStatus === "offline" ? "Serveur injoignable — vos données restent sur ce téléphone" : "Connecté au serveur central";
+  else if (a.enabled && a.baseUrl) txt = "Non connecté au serveur — déconnectez-vous puis reconnectez-vous";
+  else txt = "Mode local — données uniquement sur ce téléphone";
+  var last = a.lastSyncAt ? "Dernière synchronisation : " + new Date(a.lastSyncAt).toLocaleString("fr-FR") : "";
+  return '<div class="panel" style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:180px"><strong>' + esc(txt) + '</strong>' + (last ? '<div class="muted" style="font-size:12px">' + esc(last) + '</div>' : '') + '</div>' + (on ? '<button class="btn sec" onclick="syncWithServer(false)">Synchroniser</button>' : '') + '</div>';
 }
 
 function changePassword(){
@@ -5777,7 +5786,7 @@ function render(){
       if (state.user && !canAccessPage(page)) page = "home";
       root.innerHTML = state.user ? shell() : loginView();
     }
-    var versionBanner = '<div id="ppVersionBanner" style="position:relative;z-index:99999;background:#fff3a6;color:#4a3b00;border:2px solid #d4a900;border-radius:8px;padding:9px 12px;margin:8px auto;max-width:1000px;font:700 13px Arial,sans-serif;text-align:center">PORTAIL PARENTS V2.3.110 | rôle=' + (isAdmin() ? 'administration' : (isSupervisor() ? 'surveillant général' : (isTeacher() ? 'enseignant' : (state.user ? 'parent/autre' : 'non connecté')))) + ' | parents actifs=' + ((Array.isArray(state.parents) ? state.parents : []).filter(function(p){ return p && p.active !== false && p.name; }).length) + '</div>';
+    var versionBanner = '<div id="ppVersionBanner" style="position:relative;z-index:99999;background:#fff3a6;color:#4a3b00;border:2px solid #d4a900;border-radius:8px;padding:9px 12px;margin:8px auto;max-width:1000px;font:700 13px Arial,sans-serif;text-align:center">PORTAIL PARENTS V2.3.111 | rôle=' + (isAdmin() ? 'administration' : (isSupervisor() ? 'surveillant général' : (isTeacher() ? 'enseignant' : (state.user ? 'parent/autre' : 'non connecté')))) + ' | parents actifs=' + ((Array.isArray(state.parents) ? state.parents : []).filter(function(p){ return p && p.active !== false && p.name; }).length) + '</div>';
     try { var ff = document.getElementById('ppForcePwd'); if (state.user && mustChangeFor(state.user)) showForcedPasswordChange(state.user); else if (ff) ff.remove(); } catch (e) {}
   } catch (e) {
     console.error("Portail Parents render error:", e);
@@ -5803,7 +5812,7 @@ try { applyTheme(); render(); } catch (bootErr) {
 /* PORTAIL PARENTS — correctifs métier V2.3.78 */
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.110';
+  window.GESCO_VERSION='2.3.111';
   document.title='Portail Parents — CST Manjo';
   var oldView=view;
   canAccessPage=function(p){
@@ -6208,7 +6217,7 @@ window.gesco435Mount=mount435;
   window.gesco36Panel=function(){
     ensure(); var s=st(),a=s.stage36_38.lastAudit;
     var rows=a?a.checks.map(function(x){return '<div class="item"><b>'+(x.ok?'✓':'⚠')+' '+escS(x.name)+'</b><div class="muted">'+escS(x.detail)+'</div></div>';}).join(''): '<div class="empty">Aucun audit exécuté.</div>';
-    return '<div class="panel" id="stage36Panel"><div class="panel-head"><div><h2>Finalisation — Sauvegarde et contrôle</h2><p class="muted">Sauvegarde · sécurité · audit fonctionnel.</p></div><span class="badge">v2.3.110</span></div>'+
+    return '<div class="panel" id="stage36Panel"><div class="panel-head"><div><h2>Finalisation — Sauvegarde et contrôle</h2><p class="muted">Sauvegarde · sécurité · audit fonctionnel.</p></div><span class="badge">v2.3.111</span></div>'+
       '<div class="grid">'+
       '<div class="card"><b>Étape 36</b><p class="muted">Sauvegarde complète + copie locale de sécurité.</p><button class="btn primary" onclick="gesco36Backup()">⬇ Sauvegarder maintenant</button></div>'+ 
       '<div class="card"><b>Étape 37</b><p class="muted">Session, rôles et actions sensibles protégés.</p><button class="btn secondary" onclick="if(typeof requireSession===\'function\'&&requireSession()){toast(\'Contrôle de sécurité OK\');gesco36RunAudit()}">🔐 Vérifier la sécurité</button></div>'+ 
@@ -6258,7 +6267,7 @@ window.gesco435Mount=mount435;
 <script id="gescoFinalConsolidation68">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.110';
+  window.GESCO_VERSION='2.3.111';
   function S(){return window.state || (typeof state!=='undefined' ? state : {});}
   function A(v){return Array.isArray(v)?v:[];}
   window.gesco68ValidateData=function(){
@@ -6425,7 +6434,7 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
 <script>
 /* PORTAIL PARENTS 2.3.79 — règles de communication et visibilité */
 (function(){
-  window.GESCO_VERSION='2.3.110';
+  window.GESCO_VERSION='2.3.111';
   function parentClasses(p){
     if(!p) return [];
     var kids=Array.isArray(p.children)?p.children:[];
@@ -6552,7 +6561,7 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
 <script id="portalSupervisorV2385">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.110';
+  window.GESCO_VERSION='2.3.111';
   function escS(v){return typeof esc==='function'?esc(String(v==null?'':v)):String(v||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
   var priorAccess=canAccessPage;
   canAccessPage=function(p){
@@ -6610,6 +6619,77 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
   };
 })();
 </script>
+<style id="pp-ui-clean">
+#stage36Host,#stage36Panel,#gesco547Host,#gesco547Panel,#gesco547Report,#gesco6874,#gesco617-panel,#gesco740Mount{display:none!important}
+body[data-pp-role="admin"][data-pp-page="profil"] #stage36Host,body[data-pp-role="admin"][data-pp-page="profil"] #stage36Panel{display:block!important}
+.pp-hide{display:none!important}
+@media (max-width:700px){
+  .top{height:auto!important;min-height:64px;padding:8px 12px!important;row-gap:8px}
+  .top-search{order:3;flex:1 1 100%!important;width:100%;max-width:100%!important;margin:0!important}
+  .top .user{font-size:12px}
+  .pp-actions{display:grid!important;grid-template-columns:1fr 1fr;gap:8px}
+  .pp-actions>.panel-head{grid-column:1/-1}
+  .pp-actions>.btn{width:100%;margin:0!important;justify-content:center;text-align:center}
+}
+</style>
+<script id="pp-ui-clean-js">
+(function(){
+  var NUM = /^\s*\d{1,2}(?:\s*[–-]\s*\d{1,2})?\s*[—–·-]\s*/;
+  function role(){
+    var u = (typeof state !== "undefined" && state) ? state.user : null;
+    if (!u) return "";
+    if (u === "admin") return "admin";
+    if (String(u).indexOf("teacher:") === 0) return "teacher";
+    if (String(u).indexOf("supervisor") === 0) return "supervisor";
+    return "parent";
+  }
+  function relabel(sel, from, to){
+    document.querySelectorAll(sel).forEach(function(e){
+      if (e.getAttribute("aria-label")) e.setAttribute("aria-label", to);
+      if (e.title) e.title = to;
+      if (e.innerHTML.indexOf(from) !== -1) e.innerHTML = e.innerHTML.split(from).join(to);
+    });
+  }
+  function post(){
+    try {
+      var r = role(), pg = (typeof page !== "undefined") ? page : "";
+      document.body.setAttribute("data-pp-role", r);
+      document.body.setAttribute("data-pp-page", pg);
+      if (!r) return;
+      document.querySelectorAll('[data-page="bloc2"]').forEach(function(e){ e.remove(); });
+      if (r !== "admin") document.querySelectorAll('[data-page="controle"]').forEach(function(e){ e.remove(); });
+      relabel('[data-page="controle"]', "Contrôle final", "Diagnostic");
+      relabel('[data-page="bloc3"]', "Bloc 3", "Messagerie avancée");
+      if ((pg === "bloc2" || (pg === "controle" && r !== "admin")) && typeof go === "function") { go("home"); return; }
+      var c = document.querySelector(".content"); if (!c) return;
+      c.querySelectorAll("h1,h2,h3,h4").forEach(function(h){
+        if (h.children.length) return;
+        var t = h.textContent;
+        var n = t.replace("Bloc 3 — ", "").replace("Finalisation — Sauvegarde et contrôle", "Sauvegarde et restauration").replace(NUM, "");
+        if (t === "Contrôle final") n = "Diagnostic";
+        if (n !== t) h.textContent = n;
+      });
+      c.querySelectorAll("p.muted").forEach(function(e){ if (e.textContent.indexOf("Fonctionnalités 21 à 30 : ") === 0) e.textContent = e.textContent.replace("Fonctionnalités 21 à 30 : ", "").replace(/^./, function(m){ return m.toUpperCase(); }); });
+      var ISO1 = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/, ISOG = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
+      var tw = document.createTreeWalker(c, NodeFilter.SHOW_TEXT, null), tn, todo = [];
+      while ((tn = tw.nextNode())) { if (ISO1.test(tn.nodeValue) && !/^(SCRIPT|STYLE|TEXTAREA|PRE|CODE)$/.test(tn.parentNode.nodeName)) todo.push(tn); }
+      todo.forEach(function(n){ n.nodeValue = n.nodeValue.replace(ISOG, function(m){ var d = new Date(m); return isNaN(d) ? m : d.toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }); });
+      c.querySelectorAll(".panel").forEach(function(pn){
+        var hh = pn.querySelector(".panel-head h3");
+        if (hh && hh.textContent.trim() === "Actions rapides") pn.classList.add("pp-actions");
+      });
+      if (r !== "admin") c.querySelectorAll(".panel").forEach(function(pn){
+        var h = pn.querySelector("h2,h3"); if (!h) return;
+        if (/^(File d.attente des bulletins|État de synchronisation)/.test(h.textContent.trim())) pn.classList.add("pp-hide");
+      });
+    } catch (e) {}
+  }
+  var base = window.render;
+  if (typeof base === "function") window.render = function(){ var x = base.apply(this, arguments); post(); return x; };
+  setInterval(post, 1200);
+  post();
+})();
+</script>
 <script id="pp-server-autoconfig">
 window.__ppServerReady = (function(){
   if (!/^https?:$/.test(location.protocol)) return Promise.resolve();
@@ -6628,7 +6708,7 @@ window.__ppServerReady = (function(){
 (function(){
   window.PORTAIL_PARENTS_DIAGNOSTIC = function(){
     var e=window.__PP_LAST_RENDER_ERROR||null;
-    var out={version:'2.3.110',page:typeof page!=='undefined'?page:null,userRole:(typeof isAdmin==='function'&&isAdmin())?'admin':((typeof isSupervisor==='function'&&isSupervisor())?'supervisor':((typeof isTeacher==='function'&&isTeacher())?'teacher':'parent')),lastRenderError:e,localStorageAvailable:!!window.localStorage};
+    var out={version:'2.3.111',page:typeof page!=='undefined'?page:null,userRole:(typeof isAdmin==='function'&&isAdmin())?'admin':((typeof isSupervisor==='function'&&isSupervisor())?'supervisor':((typeof isTeacher==='function'&&isTeacher())?'teacher':'parent')),lastRenderError:e,localStorageAvailable:!!window.localStorage};
     var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,2)],{type:'application/json'}));a.download='portail-parents-diagnostic-v2-3-109.json';a.click();setTimeout(function(){URL.revokeObjectURL(a.href)},1000);
   };
 })();
@@ -6638,7 +6718,7 @@ window.__ppServerReady = (function(){
 <script id="pp23100-finalisation-communication-bulletins">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.110';
+  window.GESCO_VERSION='2.3.111';
   function safeText(v){return typeof esc==='function'?esc(String(v==null?'':v)):String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
   function parentClassList(p){
     if(!p)return [];
@@ -6659,7 +6739,7 @@ window.__ppServerReady = (function(){
     var h=previousShell();
     if(isTeacher()||isSupervisor()) h=h.replace(/<button data-page="bulletins"[\s\S]*?<\/button>/,'');
     if(!isAdmin()) h=h.replace(/<button data-page="affectations"[\s\S]*?<\/button>/,'');
-    h=h.replace(/v2\.3\.99/g,'v2.3.110');
+    h=h.replace(/v2\.3\.99/g,'v2.3.111');
     return h;
   };
   var previousBulletinView=window.bulletinView;
@@ -6721,7 +6801,7 @@ window.__ppServerReady = (function(){
 <script id="pp23103-destinataires-fiables">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.110';
+  window.GESCO_VERSION='2.3.111';
   function norm(v){return String(v==null?'':v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/\s+/g,' ');}
   function idOfUser(){var u=state&&state.user;if(u&&typeof u==='object')return u.id!=null?String(u.id):'';var z=String(u==null?'':u);return z.indexOf('teacher:')===0?z.slice(8):(z.indexOf('parent:')===0?z.slice(7):z);}
   window.currentTeacher=function(){if(!isTeacher())return null;var id=idOfUser();return (state.teachers||[]).find(function(t){return t&&String(t.id)===id;})||null;};
@@ -6767,8 +6847,8 @@ window.__ppServerReady = (function(){
     var read=typeof readAttachment==='function'?readAttachment(document.getElementById('attach')):Promise.resolve(null);
     Promise.resolve(read).then(function(attach){var msg={id:Date.now(),from:typeof myLabel==='function'?myLabel():(admin?'Administration':teacher?(t&&t.name||'Enseignant'):parent?parent.name:'Surveillant général'),to:toLabel,subject:sub,body:body,date:typeof nowStr==='function'?nowStr():new Date().toLocaleString(),read:false,readBy:{},deliveryStatus:'queued',sentAt:null,deliveredAt:null,readAt:null,attach:attach||null,voice:window._gescoVoiceAttachment||null,parentId:parentId,recipientId:recipientId==null?null:(isNaN(Number(recipientId))?recipientId:Number(recipientId)),recipientRole:kind,senderId:senderId,senderRole:admin?'admin':(supervisor?'supervisor':(teacher?'teacher':'parent')),group:null};state.messages=Array.isArray(state.messages)?state.messages:[];state.messages.push(msg);window._gescoVoiceAttachment=null;try{if(typeof logActivity==='function')logActivity('Message envoyé',sub+' → '+toLabel);if(typeof pushNotif==='function')pushNotif('Nouveau message : '+sub+' — '+toLabel,'message','message',msg.id);}catch(e){}try{if((admin||teacher||supervisor)&&parentId){if(typeof triggerAutoSMS==='function')triggerAutoSMS('message',{parentId:parentId,subject:sub});if(typeof triggerAutoWhatsApp==='function')triggerAutoWhatsApp('message',{parentId:parentId,subject:sub,fullBody:body});}}catch(e){}if(typeof save==='function')save(false);try{if(typeof publishMessageToServer==='function')Promise.resolve(publishMessageToServer(msg)).then(function(ok){if(ok){msg.sentAt=typeof nowStr==='function'?nowStr():new Date().toLocaleString();save(false);}}).catch(function(){});}catch(e){}toast('Message envoyé à '+toLabel);if(typeof go==='function')go('messages');}).catch(function(){if(btn){btn.disabled=false;btn.textContent='Envoyer';}toast('Impossible de joindre le fichier. Réessayez.');});
   };
-  window.GESCO_VERSION='2.3.110';
-  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.110';}catch(e){}
+  window.GESCO_VERSION='2.3.111';
+  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';}catch(e){}
 })();
 </script>
 
@@ -6777,7 +6857,7 @@ window.__ppServerReady = (function(){
 <script id="pp23104-circuit-bulletins">
 (function(){
  'use strict';
- window.GESCO_VERSION='2.3.110';
+ window.GESCO_VERSION='2.3.111';
  function norm(v){return String(v==null?'':v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/\s+/g,' ')}
  function safe(v){return typeof esc==='function'?esc(String(v==null?'':v)):String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
  function parentClasses(p){return (window.__ppClassListReliable?window.__ppClassListReliable(p):[]).filter(Boolean)}
@@ -6829,7 +6909,7 @@ window.__ppServerReady = (function(){
  window.portalForwardBulletin=function(id){if(!requireSession()||!isTeacher()||isSupervisor())return toast('Action réservée au professeur principal');var t=currentTeacher(),b=allBulls().find(function(x){return String(x.id)===String(id)});if(!t||!b||String(b.principalTeacherId)!==String(t.id)||b.stage!=='toPrincipal')return toast('Ce bulletin ne vous est pas destiné ou a déjà été transmis');if(!teacherClasses(t).some(function(c){return norm(c)===norm(b.className)}))return toast('Vous n’êtes pas le professeur principal de cette classe');var r=reqForBulletin(b);if(!r)return toast('Demande d’origine introuvable : transmission bloquée');b.stage='sentToParents';b.forwardedAt=nowStr();b.forwardedBy=t.id;r.status='delivered';if(typeof markLocalChange==='function')markLocalChange();r.deliveredAt=nowStr();if(!save()){b.stage='toPrincipal';delete b.forwardedAt;delete b.forwardedBy;r.status='sent';delete r.deliveredAt;return toast('Transmission non enregistrée. Réessayez.')};window.__ppRecordBulletinEvent('transmis_au_parent',{bulletinId:b.id,requestId:r.id,parentId:r.parentId,teacherId:t.id,className:b.className,sequence:b.sequence,details:'Transmission au parent demandeur'});try{if(typeof publishMessageToServer==='function'){var recipient=(state.parents||[]).find(function(p){return String(p.id)===String(r.parentId)});var msg={id:Date.now()+2,from:t.name||'Professeur principal',to:recipient&&recipient.name||'Parent',subject:'Bulletin séquentiel disponible — '+b.className+' — '+b.sequence,body:'Le bulletin demandé pour '+(r.childName||'votre enfant')+' est disponible dans votre espace Bulletins. Vous pouvez le télécharger depuis votre compte.',date:nowStr(),read:false,readBy:{},deliveryStatus:'queued',sentAt:null,deliveredAt:null,readAt:null,attach:null,voice:null,parentId:r.parentId,recipientId:r.parentId,recipientRole:'parent',senderId:t.id,senderRole:'teacher',group:null,bulletinId:b.id,bulletinRequestId:r.id};state.messages=Array.isArray(state.messages)?state.messages:[];state.messages.push(msg);save();Promise.resolve(publishMessageToServer(msg)).catch(function(){});}}catch(e){}try{if(typeof logActivity==='function')logActivity('Bulletin transmis au parent demandeur',b.className+' — '+b.sequence+' — '+t.name);if(typeof pushNotif==='function')pushNotif('Le professeur principal a transmis le bulletin : '+b.className+' — '+b.sequence,'info','bulletin',b.id)}catch(e){}render();toast('Bulletin transmis au parent demandeur pour '+b.className+'.');};
  window.portalDownloadBulletin=function(id){var b=allBulls().find(function(x){return String(x.id)===String(id)});if(!b||!b.data||b.available===false)return toast('Bulletin indisponible');if(isAdmin())return toast('Le téléchargement par l’administration n’est pas proposé depuis cet écran.');if(isTeacher()){var t=currentTeacher();if(!t||String(b.principalTeacherId)!==String(t.id)||b.stage!=='toPrincipal')return toast('Accès refusé : bulletin non destiné à votre compte');return window.portalPreviewPrincipalBulletin(id)}var p=currentParent();if(!p||b.stage!=='sentToParents'||!parentHasClass(p,b.className)||!myRequests().some(function(r){return String(r.parentId)===String(p.id)&&String(r.id)===String(b.requestId)&&r.status==='delivered'}))return toast('Accès refusé : le bulletin ne vous a pas été transmis');var a=document.createElement('a');a.href=b.data;a.download=(b.name||('Bulletin_'+b.className+'_'+b.sequence+'.pdf')).replace(/[\\/:*?"<>|]/g,'_');document.body.appendChild(a);a.click();a.remove();};
  window.portalDeleteClassBulletin=function(id){if(!requireSession()||!isAdmin())return toast('Suppression réservée à l’administration');if(!confirm('Supprimer ce bulletin officiel et son lien de transmission ?'))return;var old=allBulls().slice(),oldR=myRequests().map(function(r){return Object.assign({},r)});state.bulletins=allBulls().filter(function(b){return String(b.id)!==String(id)});myRequests().forEach(function(r){if(String(r.bulletinId)===String(id))r.status='requested';});if(!save()){state.bulletins=old;state.bulletinRequests=oldR;return toast('Suppression non enregistrée')};render();toast('Bulletin supprimé');};
- try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.110';if(typeof render==='function')render()}catch(e){console.error('V2.3.104 bulletin workflow',e)}
+ try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';if(typeof render==='function')render()}catch(e){console.error('V2.3.104 bulletin workflow',e)}
 })();
 </script>
 
@@ -6838,7 +6918,7 @@ window.__ppServerReady = (function(){
 <script id="pp23105-bulletin-audit">
 (function(){
  'use strict';
- window.GESCO_VERSION='2.3.110';
+ window.GESCO_VERSION='2.3.111';
  window.__ppRecordBulletinEvent=function(type,data){
    try{
      state.bulletinHistory=Array.isArray(state.bulletinHistory)?state.bulletinHistory:[];
@@ -6865,7 +6945,7 @@ window.__ppServerReady = (function(){
    }catch(e){}
    return html;
  };
- try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.110';if(typeof render==='function')render()}catch(e){}
+ try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';if(typeof render==='function')render()}catch(e){}
 })();
 </script>
 
@@ -6873,7 +6953,7 @@ window.__ppServerReady = (function(){
 <script id="pp23106-sync-bulletins">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.110';
+  window.GESCO_VERSION='2.3.111';
   function esc106(v){return typeof esc==='function'?esc(String(v==null?'':v)):String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
   function syncLabel(){
     var a=state&&state.api||{};
@@ -6902,7 +6982,7 @@ window.__ppServerReady = (function(){
     status+='</div>';
     return html+status;
   };
-  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.110';if(typeof render==='function')render()}catch(e){console.warn('V2.3.106',e)}
+  try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';if(typeof render==='function')render()}catch(e){console.warn('V2.3.106',e)}
 })();
 </script>
 
@@ -6911,14 +6991,14 @@ window.__ppServerReady = (function(){
 <script id="pp23107-sync-dirty-bulletins">
 (function(){
   'use strict';
-  window.GESCO_VERSION='2.3.110';
+  window.GESCO_VERSION='2.3.111';
   try {
     if (typeof state !== 'undefined' && state && typeof state === 'object') {
       if (!Array.isArray(state.bulletinRequests)) state.bulletinRequests=[];
       if (!Array.isArray(state.bulletinHistory)) state.bulletinHistory=[];
     }
     var title=document.querySelector('title');
-    if(title) title.textContent='Portail Parents — V2.3.110';
+    if(title) title.textContent='Portail Parents — V2.3.111';
     if(typeof render==='function') render();
   } catch(e) { console.warn('V2.3.107 initialisation',e); }
 })();
@@ -6929,7 +7009,7 @@ window.__ppServerReady = (function(){
 <script id="pp23108-outbox-bulletins">
 (function(){
  'use strict';
- window.GESCO_VERSION='2.3.110';
+ window.GESCO_VERSION='2.3.111';
  function ensureQueue(){
    if(typeof state==='undefined'||!state||typeof state!=='object')return [];
    if(!Array.isArray(state.bulletinSyncQueue))state.bulletinSyncQueue=[];
@@ -6984,6 +7064,6 @@ window.__ppServerReady = (function(){
    }catch(e){}
    return html;
  };
- try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.110';if(typeof render==='function')render();}catch(e){}
+ try{var title=document.querySelector('title');if(title)title.textContent='Portail Parents — V2.3.111';if(typeof render==='function')render();}catch(e){}
 })();
 </script>
