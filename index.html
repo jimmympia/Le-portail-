@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Portail Parents">
 <script>if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<title>Portail Parents — V2.3.114</title>
+<title>Portail Parents — V2.3.118</title>
 <style>
 *{box-sizing:border-box}
 :root{
@@ -136,6 +136,8 @@ h1,h2,h3,p{margin-top:0}.muted{color:var(--muted);font-size:14px}.field{margin:1
  .nav button[data-page="affectations"]:before{content:"👥"}
  .nav button[data-page="classes"]:before{content:"☰"}
  .nav button[data-page="subjects"]:before{content:"📘"}
+ .nav button[data-page="viescolaire"]:before{content:"🏫"}
+ .nav button[data-page="maintenance"]:before{content:"🛠"}
  .nav button[data-page="activity"]:before{content:"📋"}
  .nav button[data-page="bloc2"]:before{content:"Ⅱ"}
  .nav button[data-page="controle"]:before{content:"🛠"}
@@ -1097,7 +1099,7 @@ function exportFullBackup(){
   if (!requireSession()) return;
   var payload = {
     app: "GESCO_Communication",
-    version: "2.3.93",
+    version: "2.3.117",
     exportedAt: new Date().toISOString(),
     state: state
   };
@@ -5924,7 +5926,7 @@ function render(){
       if (state.user && !canAccessPage(page)) page = "home";
       root.innerHTML = state.user ? shell() : loginView();
     }
-    var versionBanner = '<div id="ppVersionBanner" style="position:relative;z-index:99999;background:#fff3a6;color:#4a3b00;border:2px solid #d4a900;border-radius:8px;padding:9px 12px;margin:8px auto;max-width:1000px;font:700 13px Arial,sans-serif;text-align:center">PORTAIL PARENTS V2.3.112 | rôle=' + (isAdmin() ? 'administration' : (isSupervisor() ? 'surveillant général' : (isTeacher() ? 'enseignant' : (state.user ? 'parent/autre' : 'non connecté')))) + ' | parents actifs=' + ((Array.isArray(state.parents) ? state.parents : []).filter(function(p){ return p && p.active !== false && p.name; }).length) + '</div>';
+    var versionBanner = '<div id="ppVersionBanner" style="position:relative;z-index:99999;display:none;background:#fff3a6;color:#4a3b00;border:2px solid #d4a900;border-radius:8px;padding:9px 12px;margin:8px auto;max-width:1000px;font:700 13px Arial,sans-serif;text-align:center">PORTAIL PARENTS V2.3.112 | rôle=' + (isAdmin() ? 'administration' : (isSupervisor() ? 'surveillant général' : (isTeacher() ? 'enseignant' : (state.user ? 'parent/autre' : 'non connecté')))) + ' | parents actifs=' + ((Array.isArray(state.parents) ? state.parents : []).filter(function(p){ return p && p.active !== false && p.name; }).length) + '</div>';
     try { var ff = document.getElementById('ppForcePwd'); if (state.user && mustChangeFor(state.user)) showForcedPasswordChange(state.user); else if (ff) ff.remove(); } catch (e) {}
   } catch (e) {
     console.error("Portail Parents render error:", e);
@@ -7623,6 +7625,1633 @@ window.__ppServerReady = (function(){
   try {
     var title = document.querySelector('title');
     if (title) title.textContent = 'Portail Parents — V2.3.114';
+  } catch (e) {}
+})();
+</script>
+
+<!-- V2.3.115 — Sprint 1 : moteur unique de communication & rôles -->
+<script id="pp23115-comm-engine">
+(function(){
+  'use strict';
+  /**
+   * Source unique des règles de communication.
+   * Toute logique compose / sendMsg / visibleMessages doit passer par ici.
+   *
+   * Rôles :
+   *  - admin       : voit tout, écrit à parents et enseignants
+   *  - supervisor  : voit ses messages + absences/discipline ; écrit aux parents
+   *  - teacher     : écrit à l’admin + parents de ses classes principales
+   *  - parent      : écrit à l’admin + professeurs principaux de ses enfants
+   */
+  window.GESCO_VERSION = '2.3.115';
+  window.PP_COMM = window.PP_COMM || {};
+
+  function escH(v){
+    return typeof esc === 'function'
+      ? esc(String(v == null ? '' : v))
+      : String(v == null ? '' : v).replace(/[&<>"']/g, function(c){
+          return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+        });
+  }
+  function norm(v){
+    return String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/\s+/g,' ');
+  }
+  function roleOf(){
+    if (typeof isAdmin === 'function' && isAdmin()) return 'admin';
+    if (typeof isSupervisor === 'function' && isSupervisor()) return 'supervisor';
+    if (typeof isTeacher === 'function' && isTeacher()) return 'teacher';
+    if (typeof state !== 'undefined' && state && state.user) return 'parent';
+    return null;
+  }
+  function sg(){
+    return (typeof currentSupervisor === 'function' ? currentSupervisor() : null) || (state && state.supervisor) || {};
+  }
+  function sgName(){ return (sg().name && String(sg().name).trim()) || 'Surveillant général'; }
+  function parentOf(){ return typeof currentParent === 'function' ? currentParent() : null; }
+  function teacherOf(){ return typeof currentTeacher === 'function' ? currentTeacher() : null; }
+
+  function classesOfParent(p){
+    if (typeof window.__ppClassListReliable === 'function') return window.__ppClassListReliable(p) || [];
+    if (!p) return [];
+    var out = [];
+    (Array.isArray(p.children) ? p.children : []).forEach(function(c){
+      var v = typeof c === 'string' ? c : (c && (c.className || c.classe || c.class));
+      if (v) out.push(String(v));
+    });
+    if (p.className) out.push(String(p.className));
+    return Array.from(new Set(out.filter(Boolean)));
+  }
+  function principalEntries(){
+    if (typeof window.__ppPrincipalEntriesReliable === 'function') return window.__ppPrincipalEntriesReliable() || [];
+    var out = [], map = (state && state.classPrincipals) || {};
+    Object.keys(map).forEach(function(c){
+      var id = map[c];
+      if (id && typeof id === 'object') id = id.teacherId != null ? id.teacherId : id.id;
+      var t = (state.teachers || []).find(function(x){ return x && String(x.id) === String(id); });
+      if (t) out.push({ cls: String(c), teacher: t });
+    });
+    (state.teachers || []).forEach(function(t){
+      if (t && t.active !== false && t.isPrincipal && t.principalClass) {
+        if (!out.some(function(e){ return norm(e.cls) === norm(t.principalClass) && String(e.teacher.id) === String(t.id); }))
+          out.push({ cls: String(t.principalClass), teacher: t });
+      }
+    });
+    return out;
+  }
+  function principalClassesOfTeacher(t){
+    if (!t) return [];
+    return principalEntries().filter(function(e){ return String(e.teacher.id) === String(t.id); }).map(function(e){ return e.cls; });
+  }
+
+  /* ---------- Visibilité messages ---------- */
+  function messageVisibleTo(m, role){
+    if (!m) return false;
+    if (role === 'admin') return true;
+    if (role === 'supervisor') {
+      var name = sgName();
+      var hay = [m.subject, m.body, m.category, m.topic].join(' ').toLowerCase();
+      return m.to === name || m.from === name
+        || m.recipientRole === 'supervisor' || m.senderRole === 'supervisor'
+        || String(m.senderId) === 'supervisor:1'
+        || /absence|retard|disciplin|sanction|comportement|convocation/.test(hay);
+    }
+    if (role === 'teacher') {
+      var t = teacherOf(); if (!t) return false;
+      var tid = String(t.id), tname = t.name || '';
+      var mine = (m.senderRole === 'teacher' && String(m.senderId) === tid)
+        || (m.recipientRole === 'teacher' && String(m.recipientId) === tid)
+        || m.from === tname || m.to === tname;
+      if (!mine) return false;
+      if (m.senderRole === 'admin' || m.recipientRole === 'admin' || m.from === 'Administration' || m.to === 'Administration') return true;
+      var cls = principalClassesOfTeacher(t);
+      var p = null;
+      if (m.parentId != null) p = (state.parents || []).find(function(x){ return String(x.id) === String(m.parentId); });
+      else if (m.recipientRole === 'parent' && m.recipientId != null)
+        p = (state.parents || []).find(function(x){ return String(x.id) === String(m.recipientId); });
+      if (!p) return true; // message enseignant↔admin déjà filtré
+      return classesOfParent(p).some(function(c){ return cls.some(function(tc){ return norm(tc) === norm(c); }); });
+    }
+    // parent
+    var p = parentOf(); if (!p) return false;
+    if (String(m.parentId) === String(p.id)) return true;
+    if (m.recipientRole === 'parent' && String(m.recipientId) === String(p.id)) return true;
+    if (m.senderRole === 'parent' && String(m.senderId) === String(p.id)) return true;
+    if (m.to === p.name || m.from === p.name) return true;
+    if (m.group === 'ALL') return true;
+    if (m.group && classesOfParent(p).some(function(c){ return norm(c) === norm(m.group); })) return true;
+    return false;
+  }
+
+  window.PP_COMM.role = roleOf;
+  window.PP_COMM.classesOfParent = classesOfParent;
+  window.PP_COMM.principalEntries = principalEntries;
+  window.PP_COMM.messageVisibleTo = messageVisibleTo;
+
+  window.visibleMessages = function(){
+    var role = roleOf();
+    var all = (state && state.messages) || [];
+    if (!role) return [];
+    return all.filter(function(m){ return messageVisibleTo(m, role); });
+  };
+
+  /* ---------- Destinataires autorisés ---------- */
+  function recipientOptionsHtml(){
+    var role = roleOf();
+    var html = '';
+    function opt(label, value, id, kind){
+      return '<option value="' + escH(value) + '" data-id="' + escH(id == null ? '' : id) + '" data-kind="' + kind + '">' + escH(label) + '</option>';
+    }
+    if (role === 'admin') {
+      (state.parents || []).filter(function(p){ return p && p.active !== false && p.name; }).forEach(function(p){
+        html += opt(p.name + ' — ' + (classesOfParent(p).join(', ') || 'Classe non précisée'), p.name, p.id, 'parent');
+      });
+      (state.teachers || []).filter(function(t){ return t && t.active !== false && t.name; }).forEach(function(t){
+        html += opt(t.name + ' — Enseignant', t.name, t.id, 'teacher');
+      });
+    } else if (role === 'supervisor') {
+      (state.parents || []).filter(function(p){ return p && p.active !== false && p.name; }).forEach(function(p){
+        html += opt(p.name + ' — ' + (classesOfParent(p).join(', ') || 'Classe non précisée'), p.name, p.id, 'parent');
+      });
+      if (!html) html = '<option value="" disabled>Aucun compte parent actif</option>';
+    } else if (role === 'teacher') {
+      html += opt('Administration', 'Administration', '', 'admin');
+      var t = teacherOf(), cls = principalClassesOfTeacher(t);
+      (state.parents || []).filter(function(p){
+        return p && p.active !== false && p.name && classesOfParent(p).some(function(c){
+          return cls.some(function(tc){ return norm(tc) === norm(c); });
+        });
+      }).forEach(function(p){
+        var rel = classesOfParent(p).filter(function(c){ return cls.some(function(tc){ return norm(tc) === norm(c); }); });
+        html += opt(p.name + ' — ' + rel.join(', '), p.name, p.id, 'parent');
+      });
+      if (!cls.length) html += '<option value="" disabled>Aucune classe principale affectée</option>';
+    } else if (role === 'parent') {
+      html += opt('Administration', 'Administration', '', 'admin');
+      var p = parentOf(), pcs = classesOfParent(p), seen = {};
+      principalEntries().filter(function(e){
+        return pcs.some(function(c){ return norm(c) === norm(e.cls); });
+      }).forEach(function(e){
+        var id = String(e.teacher.id);
+        if (!seen[id]) {
+          seen[id] = true;
+          html += opt('Professeur principal — ' + e.teacher.name + ' (' + e.cls + ')', e.teacher.name, e.teacher.id, 'teacher');
+        }
+      });
+      if (!Object.keys(seen).length) {
+        html += '<option value="" disabled>Aucun professeur principal pour la classe de votre enfant</option>';
+      }
+    }
+    return html;
+  }
+
+  /* ---------- Templates convocation ---------- */
+  function ensureTemplates(){
+    state.templates = Array.isArray(state.templates) ? state.templates : [];
+    [
+      { id: 101, title: 'Convocation parents', subject: 'Convocation — Entretien avec les parents', body: 'Madame, Monsieur,\n\nVous êtes convoqué(e) à un entretien concernant votre enfant, le {DATE} à {HEURE}, dans l’établissement.\n\nMerci de confirmer votre présence.\n\nCordialement,\nLe Surveillant général' },
+      { id: 102, title: 'Convocation discipline', subject: 'Convocation — Suivi disciplinaire', body: 'Madame, Monsieur,\n\nSuite à un manquement au règlement, vous êtes convoqué(e) le {DATE} à {HEURE}.\n\nVotre présence est obligatoire.\n\nCordialement,\nLe Surveillant général' },
+      { id: 103, title: 'Absence / retard', subject: 'Information — Absences et retards', body: 'Madame, Monsieur,\n\nDes absences ou retards ont été constatés pour votre enfant. Merci de régulariser auprès de la vie scolaire.\n\nCordialement,\nLe Surveillant général' }
+    ].forEach(function(t){
+      if (!state.templates.some(function(x){ return x && (Number(x.id) === t.id || norm(x.title) === norm(t.title)); }))
+        state.templates.push(t);
+    });
+  }
+
+  function applyTpl(id){
+    var t = (state.templates || []).find(function(x){ return Number(x.id) === Number(id); });
+    if (!t) return;
+    var sub = document.getElementById('sub');
+    var body = document.getElementById('body');
+    if (sub) sub.value = t.subject || '';
+    if (body) body.value = t.body || '';
+    var isConv = /convocation/i.test(String(t.title || '') + ' ' + String(t.subject || ''));
+    var box = document.getElementById('convocationFields');
+    if (box) box.style.display = isConv ? '' : 'none';
+    fillDatePlaceholders();
+    if (typeof toast === 'function') toast('Modèle : ' + t.title);
+  }
+  function fillDatePlaceholders(){
+    var body = document.getElementById('body'); if (!body) return;
+    var d = document.getElementById('convDate'), tm = document.getElementById('convTime');
+    var dateLabel = '……', timeLabel = '……';
+    if (d && d.value) {
+      var parts = d.value.split('-');
+      dateLabel = parts.length === 3 ? parts[2] + '/' + parts[1] + '/' + parts[0] : d.value;
+    }
+    if (tm && tm.value) timeLabel = tm.value.replace(':', 'h');
+    if (/{DATE}|\{HEURE\}/i.test(body.value)) {
+      body.value = body.value.replace(/\{DATE\}/gi, dateLabel).replace(/\{HEURE\}/gi, timeLabel);
+    }
+  }
+  window.applyTemplate = applyTpl;
+
+  /* ---------- Compose / Send (unique) ---------- */
+  window.compose = function(){
+    ensureTemplates();
+    var role = roleOf();
+    var host = document.querySelector('.content');
+    if (!host) return;
+    var target = window._communicationTarget || null;
+    var showTpl = role === 'admin' || role === 'supervisor';
+    var help = {
+      admin: 'Écrivez aux parents ou aux enseignants.',
+      supervisor: 'Absences, retards, discipline, convocations. Choisissez un modèle et une date pour les convocations.',
+      teacher: 'Écrivez à l’administration ou aux parents de vos classes principales.',
+      parent: 'Écrivez à l’administration ou au professeur principal de votre enfant.'
+    }[role] || '';
+
+    var tplHtml = '';
+    if (showTpl) {
+      ensureTemplates();
+      var list = (state.templates || []).filter(function(t){
+        if (role === 'admin') return true;
+        var k = norm(t.title + ' ' + (t.subject || ''));
+        return /convocation|absence|retard|disciplin|parents|entretien|information/.test(k) || Number(t.id) >= 100;
+      });
+      tplHtml = '<div class="field"><label>Messages préenregistrés</label><div>' +
+        list.map(function(t){ return '<span class="tpl-chip" data-tpl="' + Number(t.id) + '">' + escH(t.title) + '</span>'; }).join('') +
+        '</div></div>';
+    }
+    var dateHtml = (role === 'admin' || role === 'supervisor')
+      ? '<div class="field" id="convocationFields" style="display:none"><label>Date de la convocation</label><input type="date" id="convDate"></div><div class="field" id="convocationTimeWrap" style="display:none"><label>Heure</label><input type="time" id="convTime" value="09:00"></div>'
+      : '';
+
+    host.innerHTML =
+      '<div class="panel"><div class="panel-head"><div><h2>' +
+      (target ? 'Conversation avec ' + escH(target.name) : 'Nouveau message') +
+      '</h2><p class="muted">' + help + '</p></div>' +
+      '<button type="button" class="btn secondary" id="ppBackMsg">Retour</button></div>' +
+      '<div class="field"><label>Destinataire</label><select id="to">' +
+      (recipientOptionsHtml() || '<option value="" disabled>Aucun destinataire</option>') +
+      '</select></div>' + tplHtml + dateHtml +
+      '<div class="field"><label>Objet</label><input id="sub" placeholder="Objet"></div>' +
+      '<div class="field"><label>Message</label><textarea id="body" placeholder="Votre message…"></textarea></div>' +
+      '<div class="field"><label>Pièce jointe (max 2 Mo)</label><input id="attach" type="file"></div>' +
+      '<div class="field"><label>Message vocal</label><div id="voiceControls"></div></div>' +
+      '<button type="button" class="btn primary" id="ppSendMsg">Envoyer</button></div>';
+
+    document.getElementById('ppBackMsg').onclick = function(){ go('messages'); };
+    document.getElementById('ppSendMsg').onclick = function(){ window.sendMsg(); };
+    host.querySelectorAll('.tpl-chip[data-tpl]').forEach(function(chip){
+      chip.onclick = function(){
+        applyTpl(chip.getAttribute('data-tpl'));
+        var box = document.getElementById('convocationFields');
+        var tw = document.getElementById('convocationTimeWrap');
+        var show = box && box.style.display !== 'none';
+        if (tw) tw.style.display = show ? '' : 'none';
+      };
+    });
+    var d = document.getElementById('convDate'), tm = document.getElementById('convTime');
+    if (d) d.onchange = fillDatePlaceholders;
+    if (tm) tm.onchange = fillDatePlaceholders;
+    try { if (typeof mountVoiceControls === 'function') mountVoiceControls(); } catch (e) {}
+  };
+
+  window.sendMsg = function(){
+    if (typeof requireSession === 'function' && !requireSession()) return;
+    var role = roleOf();
+    var subEl = document.getElementById('sub'), bodyEl = document.getElementById('body'), sel = document.getElementById('to');
+    var sub = ((subEl && subEl.value) || '').trim();
+    var body = ((bodyEl && bodyEl.value) || '').trim();
+    if (!sub || !body) return toast('Renseignez l’objet et le message');
+    if (!sel || sel.selectedIndex < 0) return toast('Choisissez un destinataire');
+    var opt = sel.options[sel.selectedIndex];
+    if (!opt || opt.disabled || !opt.value) return toast('Destinataire invalide');
+
+    fillDatePlaceholders();
+    body = ((bodyEl && bodyEl.value) || '').trim();
+    var isConv = /convocation/i.test(sub + ' ' + body);
+    var d = document.getElementById('convDate');
+    if (isConv && d && !d.value) return toast('Sélectionnez la date de la convocation');
+    if (isConv && d && d.value) {
+      var parts = d.value.split('-');
+      var dateFr = parts.length === 3 ? parts[2] + '/' + parts[1] + '/' + parts[0] : d.value;
+      if (body.indexOf(dateFr) === -1) {
+        body += '\n\nDate de convocation : ' + dateFr;
+        var tm = document.getElementById('convTime');
+        if (tm && tm.value) body += ' à ' + tm.value.replace(':', 'h');
+        if (bodyEl) bodyEl.value = body;
+      }
+    }
+
+    var kind = (opt.dataset && opt.dataset.kind) || '';
+    var id = (opt.dataset && opt.dataset.id) || '';
+    if (role === 'supervisor' && kind !== 'parent') return toast('Le surveillant écrit uniquement aux parents');
+    if (role === 'parent' && kind !== 'admin' && kind !== 'teacher') return toast('Destinataire non autorisé');
+    if (role === 'teacher' && kind !== 'admin' && kind !== 'parent') return toast('Destinataire non autorisé');
+
+    var parent = parentOf(), t = teacherOf();
+    var toLabel = kind === 'admin' ? 'Administration' : opt.value;
+    var recipientId = (kind === 'admin' || !id) ? null : (isNaN(Number(id)) ? id : Number(id));
+    var parentId = kind === 'parent' ? (isNaN(Number(id)) ? id : Number(id)) : (parent ? parent.id : null);
+    var senderId = role === 'admin' ? 'admin' : (role === 'supervisor' ? 'supervisor:1' : (role === 'teacher' ? (t && t.id) : (parent && parent.id)));
+    var fromLabel = role === 'admin' ? 'Administration' : (role === 'supervisor' ? sgName() : (role === 'teacher' ? (t && t.name) : (parent && parent.name)));
+
+    var btn = document.getElementById('ppSendMsg');
+    if (btn) { btn.disabled = true; btn.textContent = 'Envoi…'; }
+
+    var read = typeof readAttachment === 'function' ? readAttachment(document.getElementById('attach')) : Promise.resolve(null);
+    Promise.resolve(read).then(function(attach){
+      var msg = {
+        id: Date.now(),
+        from: fromLabel,
+        to: toLabel,
+        subject: sub,
+        body: body,
+        date: typeof nowStr === 'function' ? nowStr() : new Date().toLocaleString('fr-FR'),
+        read: false,
+        readBy: {},
+        deliveryStatus: 'queued',
+        sentAt: null,
+        attach: attach || null,
+        voice: window._gescoVoiceAttachment || null,
+        parentId: parentId,
+        recipientId: recipientId,
+        recipientRole: kind || 'admin',
+        senderId: senderId,
+        senderRole: role,
+        group: null,
+        category: isConv ? 'convocation' : (role === 'supervisor' ? 'vie_scolaire' : null),
+        convocationDate: (d && d.value) || null
+      };
+      state.messages = Array.isArray(state.messages) ? state.messages : [];
+      state.messages.push(msg);
+      window._gescoVoiceAttachment = null;
+      try {
+        if (typeof logActivity === 'function') logActivity('Message envoyé', sub + ' → ' + toLabel);
+        if (typeof pushNotif === 'function') pushNotif('Nouveau message : ' + sub + ' — ' + toLabel, 'message', 'message', msg.id);
+      } catch (e) {}
+      try {
+        if ((role === 'admin' || role === 'teacher' || role === 'supervisor') && parentId) {
+          if (typeof triggerAutoSMS === 'function') triggerAutoSMS('message', { parentId: parentId, subject: sub });
+          if (typeof triggerAutoWhatsApp === 'function') triggerAutoWhatsApp('message', { parentId: parentId, subject: sub, fullBody: body });
+        }
+      } catch (e) {}
+      if (typeof save === 'function') save(false);
+      try {
+        if (typeof publishMessageToServer === 'function') {
+          Promise.resolve(publishMessageToServer(msg)).then(function(ok){
+            if (ok) { msg.sentAt = typeof nowStr === 'function' ? nowStr() : new Date().toLocaleString('fr-FR'); save(false); }
+          }).catch(function(){});
+        }
+      } catch (e) {}
+      toast('Message envoyé à ' + toLabel);
+      go('messages');
+    }).catch(function(){
+      if (btn) { btn.disabled = false; btn.textContent = 'Envoyer'; }
+      toast('Échec de la pièce jointe');
+    });
+  };
+
+  window.composeConvocation = function(){
+    var role = roleOf();
+    if (role !== 'admin' && role !== 'supervisor') return toast('Réservé à l’administration ou au surveillant');
+    window.compose();
+    setTimeout(function(){
+      ensureTemplates();
+      applyTpl(101);
+      var box = document.getElementById('convocationFields');
+      var tw = document.getElementById('convocationTimeWrap');
+      if (box) box.style.display = '';
+      if (tw) tw.style.display = '';
+    }, 40);
+  };
+
+  /* ---------- Navigation : accès cohérents ---------- */
+  var priorAccess = window.canAccessPage;
+  window.canAccessPage = function(p){
+    var role = roleOf();
+    if (role === 'admin') return true;
+    if (p === 'subjects' || p === 'affectations') return false;
+    if (role === 'supervisor') {
+      return ['home','communication','messages','annonces','notifications','suivi','profil','search'].indexOf(p) !== -1;
+    }
+    if (typeof priorAccess === 'function') return priorAccess(p);
+    return true;
+  };
+
+  /* ---------- UI : boutons messagerie + masquer outils techniques ---------- */
+  function polishNav(){
+    try {
+      var role = roleOf();
+      // Masquer blocs techniques hors admin
+      if (role !== 'admin') {
+        document.querySelectorAll('[data-page="bloc2"],[data-page="bloc3"],[data-page="controle"]').forEach(function(e){ e.style.display = 'none'; });
+      } else {
+        // Admin : renommer pour clarté
+        document.querySelectorAll('[data-page="controle"]').forEach(function(e){
+          if (e.childNodes.length === 1 || (e.textContent || '').indexOf('Contrôle') !== -1) {
+            /* leave label; mobile uses :before */
+          }
+        });
+      }
+      // Boutons convocation sur messages
+      if ((role === 'admin' || role === 'supervisor') && (typeof page !== 'undefined') && (page === 'messages' || page === 'communication')) {
+        var content = document.querySelector('.content');
+        if (content && !document.getElementById('btnConvocationParents')) {
+          var bar = document.createElement('div');
+          bar.id = 'ppCommActions';
+          bar.style.cssText = 'margin:0 0 12px;display:flex;gap:8px;flex-wrap:wrap';
+          bar.innerHTML =
+            '<button type="button" class="btn primary" id="btnConvocationParents">📋 Convocation des parents</button>' +
+            '<button type="button" class="btn secondary" id="btnNewMsgFixed">✉️ Nouveau message</button>';
+          content.insertBefore(bar, content.firstChild);
+          document.getElementById('btnConvocationParents').onclick = function(){ window.composeConvocation(); };
+          document.getElementById('btnNewMsgFixed').onclick = function(){ window.compose(); };
+        }
+      }
+    } catch (e) {}
+  }
+
+  var priorRender = window.render;
+  if (typeof priorRender === 'function') {
+    window.render = function(){
+      var r = priorRender.apply(this, arguments);
+      setTimeout(polishNav, 0);
+      return r;
+    };
+  }
+
+  /* ---------- Panneau diagnostic règles (admin, page profil) ---------- */
+  window.PP_COMM.diagnose = function(){
+    var role = roleOf();
+    var msgs = (state.messages || []).length;
+    var visible = (typeof visibleMessages === 'function' ? visibleMessages() : []).length;
+    return {
+      version: '2.3.115',
+      role: role,
+      messagesTotal: msgs,
+      messagesVisible: visible,
+      parents: (state.parents || []).filter(function(p){ return p && p.active !== false; }).length,
+      teachers: (state.teachers || []).filter(function(t){ return t && t.active !== false; }).length,
+      subjects: (state.subjects || []).length,
+      engine: 'PP_COMM unique'
+    };
+  };
+
+  try {
+    var title = document.querySelector('title');
+    if (title) title.textContent = 'Portail Parents — V2.3.115';
+    ensureTemplates();
+  } catch (e) {}
+})();
+</script>
+
+<!-- V2.3.116 — Sprint 2 : Vie scolaire (absences, retards, convocations liées) -->
+<script id="pp23116-vie-scolaire">
+(function(){
+  'use strict';
+  window.GESCO_VERSION = '2.3.116';
+
+  function escH(v){
+    return typeof esc === 'function' ? esc(String(v == null ? '' : v))
+      : String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+  }
+  function todayISO(){
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  function formatDateFR(iso){
+    if (!iso) return '';
+    var p = String(iso).split('-');
+    return p.length === 3 ? p[2]+'/'+p[1]+'/'+p[0] : iso;
+  }
+  function isStaff(){
+    return (typeof isAdmin === 'function' && isAdmin()) || (typeof isSupervisor === 'function' && isSupervisor());
+  }
+  function findParentForStudent(studentName, className){
+    var name = String(studentName || '').trim().toLowerCase();
+    var cls = String(className || '').trim().toLowerCase();
+    return (state.parents || []).find(function(p){
+      if (!p || p.active === false) return false;
+      var kids = Array.isArray(p.children) ? p.children : [];
+      if (!kids.length && p.student) kids = [{ name: p.student, className: p.className }];
+      return kids.some(function(c){
+        var cn = (typeof c === 'string' ? c : (c && c.name) || '').toLowerCase();
+        var cc = (typeof c === 'object' && c ? (c.className || c.classe || '') : (p.className || '')).toLowerCase();
+        if (cn !== name) return false;
+        if (cls && cc && cc !== cls) return false;
+        return true;
+      });
+    }) || null;
+  }
+  function allStudentsOptions(){
+    if (typeof studentOptions === 'function') return studentOptions();
+    var opts = '';
+    (state.parents || []).forEach(function(p){
+      var kids = Array.isArray(p.children) ? p.children : [];
+      if (!kids.length && p.student) kids = [{ name: p.student, className: p.className }];
+      kids.forEach(function(c){
+        var n = typeof c === 'string' ? c : (c && c.name);
+        var cl = typeof c === 'object' && c ? (c.className || c.classe || '') : (p.className || '');
+        if (n) opts += '<option value="' + escH(n + '|' + cl) + '">' + escH(n + ' — ' + (cl || 'Classe ?')) + '</option>';
+      });
+    });
+    return opts || '<option value="">Aucun élève</option>';
+  }
+  function ensureAbsences(){
+    if (!Array.isArray(state.absences)) state.absences = [];
+  }
+  function absStatus(a){
+    return a.status || (a.justified ? 'justified' : 'open');
+  }
+  function statusPill(a){
+    var s = absStatus(a);
+    if (s === 'justified') return '<span class="status-pill status-justified">✓ Justifiée</span>';
+    if (s === 'pending') return '<span class="status-pill status-pending">⏳ En attente</span>';
+    if (s === 'rejected') return '<span class="status-pill status-rejected">✗ Refusée</span>';
+    if (a.type === 'retard') return '<span class="status-pill status-open">🕐 Retard</span>';
+    return '<span class="status-pill status-open">✗ Non justifiée</span>';
+  }
+
+  /** Notifie le parent concerné (message + notification) */
+  function notifyParentAbsence(abs, kind){
+    var parent = findParentForStudent(abs.student, abs.className);
+    if (!parent) return null;
+    var isRetard = abs.type === 'retard';
+    var title = isRetard
+      ? ('Retard enregistré — ' + abs.student)
+      : ('Absence enregistrée — ' + abs.student);
+    var body = isRetard
+      ? ('Un retard a été enregistré pour ' + abs.student + ' (' + (abs.className || '') + ') le ' + formatDateFR(abs.date) + (abs.reason ? '.\nMotif : ' + abs.reason : '.') + '\n\nVous pouvez justifier depuis Suivi scolaire → Absences.')
+      : ('Une absence a été enregistrée pour ' + abs.student + ' (' + (abs.className || '') + ') le ' + formatDateFR(abs.date) + (abs.reason ? '.\nMotif indiqué : ' + abs.reason : '.') + '\n\nMerci de justifier cette absence depuis Suivi scolaire → Absences, si ce n’est pas déjà fait.');
+    var fromLabel = (typeof isSupervisor === 'function' && isSupervisor())
+      ? ((state.supervisor && state.supervisor.name) || 'Surveillant général')
+      : 'Administration';
+    var msg = {
+      id: Date.now() + Math.floor(Math.random()*100),
+      from: fromLabel,
+      to: parent.name,
+      subject: title,
+      body: body,
+      date: typeof nowStr === 'function' ? nowStr() : new Date().toLocaleString('fr-FR'),
+      read: false,
+      readBy: {},
+      deliveryStatus: 'queued',
+      parentId: parent.id,
+      recipientId: parent.id,
+      recipientRole: 'parent',
+      senderId: (typeof isSupervisor === 'function' && isSupervisor()) ? 'supervisor:1' : 'admin',
+      senderRole: (typeof isSupervisor === 'function' && isSupervisor()) ? 'supervisor' : 'admin',
+      group: null,
+      category: isRetard ? 'retard' : 'absence',
+      absenceId: abs.id
+    };
+    state.messages = Array.isArray(state.messages) ? state.messages : [];
+    state.messages.push(msg);
+    try {
+      if (typeof pushNotif === 'function') pushNotif(title + ' — ' + formatDateFR(abs.date), 'info', 'absence', abs.id);
+      if (typeof logActivity === 'function') logActivity(kind || 'Vie scolaire', title);
+    } catch (e) {}
+    try {
+      if (typeof triggerAutoSMS === 'function') triggerAutoSMS('absence', { parentId: parent.id, student: abs.student, text: title });
+      if (typeof triggerAutoWhatsApp === 'function') triggerAutoWhatsApp('absence', { parentId: parent.id, student: abs.student, text: body });
+    } catch (e) {}
+    try {
+      if (typeof publishMessageToServer === 'function') Promise.resolve(publishMessageToServer(msg)).catch(function(){});
+    } catch (e) {}
+    return parent;
+  }
+
+  /** Tableau de bord Vie scolaire */
+  window.vieScolaireView = function(){
+    if (!isStaff()) return '<div class="empty">Accès réservé à l’administration et au surveillant général.</div>';
+    ensureAbsences();
+    var list = state.absences.slice().sort(function(a,b){ return String(b.date).localeCompare(String(a.date)) || (b.id||0)-(a.id||0); });
+    var today = todayISO();
+    var open = list.filter(function(a){ return absStatus(a) === 'open'; });
+    var pending = list.filter(function(a){ return absStatus(a) === 'pending'; });
+    var todayList = list.filter(function(a){ return a.date === today; });
+    var retards = list.filter(function(a){ return a.type === 'retard'; });
+
+    var stats = '<div class="stat-grid">'
+      + '<div class="stat-card"><div class="label">Aujourd’hui</div><div class="value">' + todayList.length + '</div><div class="sub">absences / retards</div></div>'
+      + '<div class="stat-card"><div class="label">Non justifiées</div><div class="value" style="color:#dc2626">' + open.length + '</div><div class="sub">à traiter</div></div>'
+      + '<div class="stat-card"><div class="label">Justificatifs en attente</div><div class="value" style="color:#d97706">' + pending.length + '</div><div class="sub">à valider</div></div>'
+      + '<div class="stat-card"><div class="label">Retards (total)</div><div class="value">' + retards.length + '</div><div class="sub">enregistrés</div></div>'
+      + '</div>';
+
+    var actions = '<div class="panel" style="margin-top:12px"><div class="panel-head"><h3>Actions rapides</h3></div>'
+      + '<div class="pp-actions" style="display:flex;gap:8px;flex-wrap:wrap">'
+      + '<button type="button" class="btn primary" onclick="vsNewAbsence()">+ Absence</button>'
+      + '<button type="button" class="btn secondary" onclick="vsNewRetard()">+ Retard</button>'
+      + '<button type="button" class="btn secondary" onclick="composeConvocation()">📋 Convocation parents</button>'
+      + '</div></div>';
+
+    function row(a){
+      var s = absStatus(a);
+      var btns = '';
+      if (s === 'pending') {
+        btns += '<button type="button" class="btn primary" style="margin:4px 4px 0 0" onclick="vsReviewAbsence(' + a.id + ',true)">✓ Valider</button>';
+        btns += '<button type="button" class="btn danger" style="margin:4px 4px 0 0" onclick="vsReviewAbsence(' + a.id + ',false)">✗ Refuser</button>';
+      }
+      if (s === 'open' || s === 'rejected') {
+        btns += '<button type="button" class="btn secondary" style="margin:4px 4px 0 0" onclick="vsConvoquer(' + a.id + ')">📋 Convoquer les parents</button>';
+        btns += '<button type="button" class="btn secondary" style="margin:4px 4px 0 0" onclick="vsRemindParent(' + a.id + ')">🔔 Relancer</button>';
+      }
+      if (typeof isAdmin === 'function' && isAdmin()) {
+        btns += '<button type="button" class="btn danger" style="margin:4px 4px 0 0" onclick="vsDeleteAbsence(' + a.id + ')">Supprimer</button>';
+      }
+      var jtxt = (a.justification && a.justification.text) ? ('<p><b>Justificatif parent :</b> ' + escH(a.justification.text) + '</p>') : '';
+      var note = a.adminNote ? ('<p class="muted">Note : ' + escH(a.adminNote) + '</p>') : '';
+      return '<div class="item">'
+        + '<div class="item-head"><b>' + escH(a.student) + '</b> ' + statusPill(a) + '</div>'
+        + '<p class="muted">' + escH(a.className || '') + ' · ' + escH(formatDateFR(a.date))
+        + (a.type === 'retard' ? ' · Retard' : ' · Absence')
+        + (a.reason ? ' · ' + escH(a.reason) : '') + '</p>'
+        + jtxt + note + btns + '</div>';
+    }
+
+    var pendingHtml = pending.length
+      ? '<div class="panel" style="margin-top:12px"><h3>Justificatifs à valider (' + pending.length + ')</h3><div class="list">' + pending.map(row).join('') + '</div></div>'
+      : '<div class="panel" style="margin-top:12px"><h3>Justificatifs à valider</h3><div class="empty">Aucun justificatif en attente.</div></div>';
+
+    var openHtml = open.length
+      ? '<div class="panel" style="margin-top:12px"><h3>Non justifiées (' + open.length + ')</h3><div class="list">' + open.slice(0, 30).map(row).join('') + '</div></div>'
+      : '<div class="panel" style="margin-top:12px"><h3>Non justifiées</h3><div class="empty">Aucune absence ouverte.</div></div>';
+
+    var recent = list.slice(0, 15);
+    var recentHtml = '<div class="panel" style="margin-top:12px"><h3>Derniers enregistrements</h3><div class="list">'
+      + (recent.map(row).join('') || '<div class="empty">Aucun enregistrement.</div>') + '</div></div>';
+
+    return '<div class="panel-head"><div><h1>Vie scolaire</h1><p class="muted">Absences, retards, justificatifs et convocations — circuit : saisie → notification parent → justification → validation → convocation si besoin.</p></div></div>'
+      + stats + actions + pendingHtml + openHtml + recentHtml;
+  };
+
+  window.vsNewAbsence = function(){
+    if (!isStaff()) return toast('Accès refusé');
+    var host = document.querySelector('.content');
+    if (!host) return;
+    host.innerHTML = '<div class="panel"><div class="panel-head"><h2>Nouvelle absence</h2><button type="button" class="btn secondary" onclick="go(\'viescolaire\')">Retour</button></div>'
+      + '<div class="field"><label>Élève</label><select id="vsStudent">' + allStudentsOptions() + '</select></div>'
+      + '<div class="field"><label>Date</label><input id="vsDate" type="date" value="' + todayISO() + '"></div>'
+      + '<div class="field"><label>Motif (facultatif)</label><input id="vsReason" placeholder="Maladie, absence non motivée…"></div>'
+      + '<div class="field"><label><input id="vsNotify" type="checkbox" checked> Notifier le parent (message + SMS/WhatsApp si configurés)</label></div>'
+      + '<button type="button" class="btn primary" onclick="vsSaveAbsence(\'absence\')">Enregistrer l’absence</button></div>';
+  };
+  window.vsNewRetard = function(){
+    if (!isStaff()) return toast('Accès refusé');
+    var host = document.querySelector('.content');
+    if (!host) return;
+    host.innerHTML = '<div class="panel"><div class="panel-head"><h2>Nouveau retard</h2><button type="button" class="btn secondary" onclick="go(\'viescolaire\')">Retour</button></div>'
+      + '<div class="field"><label>Élève</label><select id="vsStudent">' + allStudentsOptions() + '</select></div>'
+      + '<div class="field"><label>Date</label><input id="vsDate" type="date" value="' + todayISO() + '"></div>'
+      + '<div class="field"><label>Motif (facultatif)</label><input id="vsReason" placeholder="Retard matinal…"></div>'
+      + '<div class="field"><label><input id="vsNotify" type="checkbox" checked> Notifier le parent</label></div>'
+      + '<button type="button" class="btn primary" onclick="vsSaveAbsence(\'retard\')">Enregistrer le retard</button></div>';
+  };
+  window.vsSaveAbsence = function(type){
+    if (!requireSession() || !isStaff()) return;
+    ensureAbsences();
+    var sel = (document.getElementById('vsStudent') || {}).value || '';
+    var parts = sel.split('|');
+    var student = (parts[0] || '').trim();
+    var className = (parts[1] || '').trim();
+    var date = (document.getElementById('vsDate') || {}).value;
+    var reason = ((document.getElementById('vsReason') || {}).value || '').trim();
+    var notify = !!(document.getElementById('vsNotify') || {}).checked;
+    if (!student || !date) return toast('Élève et date obligatoires');
+    var abs = {
+      id: Date.now(),
+      student: student,
+      className: className,
+      date: date,
+      type: type === 'retard' ? 'retard' : 'absence',
+      justified: false,
+      status: 'open',
+      reason: reason || (type === 'retard' ? 'Retard' : 'Non justifiée'),
+      justification: null,
+      adminNote: null,
+      reviewedAt: null,
+      recordedBy: (typeof isSupervisor === 'function' && isSupervisor()) ? 'supervisor' : 'admin',
+      recordedAt: typeof nowStr === 'function' ? nowStr() : new Date().toISOString()
+    };
+    state.absences.push(abs);
+    var parent = null;
+    if (notify) parent = notifyParentAbsence(abs, type === 'retard' ? 'Retard saisi' : 'Absence saisie');
+    if (typeof markLocalChange === 'function') try { markLocalChange(); } catch (e) {}
+    if (typeof save === 'function') save();
+    toast((type === 'retard' ? 'Retard' : 'Absence') + ' enregistré(e)' + (parent ? ' — parent notifié (' + parent.name + ')' : ' — aucun parent lié trouvé'));
+    go('viescolaire');
+  };
+
+  window.vsReviewAbsence = function(id, accept){
+    if (!isStaff()) return toast('Accès refusé');
+    ensureAbsences();
+    var a = state.absences.find(function(x){ return String(x.id) === String(id); });
+    if (!a) return toast('Absence introuvable');
+    var note = accept ? 'Validé' : (prompt('Motif du refus (visible par le parent) :', 'Justificatif insuffisant') || 'Refusé');
+    a.status = accept ? 'justified' : 'rejected';
+    a.justified = !!accept;
+    a.adminNote = note;
+    a.reviewedAt = typeof nowStr === 'function' ? nowStr() : new Date().toISOString();
+    var parent = findParentForStudent(a.student, a.className);
+    if (parent) {
+      var title = accept ? ('Absence validée — ' + a.student) : ('Justificatif refusé — ' + a.student);
+      var body = accept
+        ? ('Le justificatif pour l’absence du ' + formatDateFR(a.date) + ' a été accepté.')
+        : ('Le justificatif pour l’absence du ' + formatDateFR(a.date) + ' a été refusé.\nMotif : ' + note + '\n\nVous pouvez renvoyer un justificatif depuis Suivi scolaire.');
+      state.messages = Array.isArray(state.messages) ? state.messages : [];
+      state.messages.push({
+        id: Date.now(), from: (typeof isSupervisor === 'function' && isSupervisor()) ? ((state.supervisor && state.supervisor.name) || 'Surveillant général') : 'Administration',
+        to: parent.name, subject: title, body: body,
+        date: typeof nowStr === 'function' ? nowStr() : new Date().toLocaleString('fr-FR'),
+        read: false, readBy: {}, parentId: parent.id, recipientId: parent.id, recipientRole: 'parent',
+        senderId: (typeof isSupervisor === 'function' && isSupervisor()) ? 'supervisor:1' : 'admin',
+        senderRole: (typeof isSupervisor === 'function' && isSupervisor()) ? 'supervisor' : 'admin',
+        group: null, category: 'absence', absenceId: a.id
+      });
+      try { if (typeof pushNotif === 'function') pushNotif(title, 'info', 'absence', a.id); } catch (e) {}
+    }
+    if (typeof save === 'function') save();
+    toast(accept ? 'Absence validée' : 'Justificatif refusé');
+    go('viescolaire');
+  };
+
+  window.vsRemindParent = function(id){
+    if (!isStaff()) return;
+    ensureAbsences();
+    var a = state.absences.find(function(x){ return String(x.id) === String(id); });
+    if (!a) return;
+    var parent = notifyParentAbsence(a, 'Relance');
+    if (typeof save === 'function') save();
+    toast(parent ? ('Relance envoyée à ' + parent.name) : 'Aucun parent lié à cet élève');
+  };
+
+  window.vsConvoquer = function(id){
+    if (!isStaff()) return;
+    ensureAbsences();
+    var a = state.absences.find(function(x){ return String(x.id) === String(id); });
+    if (!a) return toast('Absence introuvable');
+    var parent = findParentForStudent(a.student, a.className);
+    window._vsLinkedAbsence = a;
+    window._communicationTarget = parent ? { name: parent.name, id: parent.id, kind: 'parent' } : null;
+    if (typeof compose === 'function') compose();
+    setTimeout(function(){
+      if (typeof applyTemplate === 'function') applyTemplate(101);
+      else if (typeof window.applyTemplate === 'function') window.applyTemplate(101);
+      var sub = document.getElementById('sub');
+      var body = document.getElementById('body');
+      var to = document.getElementById('to');
+      if (sub) sub.value = 'Convocation — ' + a.student + ' (' + (a.className || '') + ')';
+      if (body) {
+        var base = body.value || '';
+        if (!base) {
+          base = 'Madame, Monsieur,\n\nSuite à ' + (a.type === 'retard' ? 'un retard' : 'une absence non justifiée') + ' de ' + a.student + ' le ' + formatDateFR(a.date) + ', vous êtes convoqué(e) le {DATE} à {HEURE}.\n\nCordialement';
+        } else {
+          base = 'Objet lié : ' + (a.type === 'retard' ? 'retard' : 'absence') + ' de ' + a.student + ' le ' + formatDateFR(a.date) + '.\n\n' + base;
+        }
+        body.value = base;
+      }
+      if (to && parent) {
+        for (var i = 0; i < to.options.length; i++) {
+          if (String(to.options[i].getAttribute('data-id')) === String(parent.id) || to.options[i].value === parent.name) {
+            to.selectedIndex = i; break;
+          }
+        }
+      }
+      var box = document.getElementById('convocationFields');
+      var tw = document.getElementById('convocationTimeWrap');
+      if (box) box.style.display = '';
+      if (tw) tw.style.display = '';
+      if (typeof toast === 'function') toast('Convocation liée à ' + a.student + ' — choisissez la date');
+    }, 50);
+  };
+
+  window.vsDeleteAbsence = function(id){
+    if (typeof isAdmin !== 'function' || !isAdmin()) return toast('Suppression réservée à l’admin');
+    if (!confirm('Supprimer cet enregistrement ?')) return;
+    state.absences = (state.absences || []).filter(function(a){ return String(a.id) !== String(id); });
+    if (typeof save === 'function') save();
+    go('viescolaire');
+  };
+
+  // Hook saveAbsence admin historique pour aussi notifier
+  var priorSaveAbsence = window.saveAbsence;
+  if (typeof priorSaveAbsence === 'function') {
+    window.saveAbsence = function(){
+      var before = (state.absences || []).length;
+      priorSaveAbsence.apply(this, arguments);
+      try {
+        if ((state.absences || []).length > before) {
+          var a = state.absences[state.absences.length - 1];
+          if (a && absStatus(a) === 'open') notifyParentAbsence(a, 'Absence saisie');
+          if (typeof save === 'function') save(false);
+        }
+      } catch (e) {}
+    };
+  }
+
+  // Navigation
+  var priorAccess = window.canAccessPage;
+  window.canAccessPage = function(p){
+    if (p === 'viescolaire') return isStaff();
+    return typeof priorAccess === 'function' ? priorAccess(p) : true;
+  };
+  var priorView = window.view;
+  window.view = function(){
+    if (typeof page !== 'undefined' && page === 'viescolaire') return vieScolaireView();
+    return typeof priorView === 'function' ? priorView.apply(this, arguments) : '';
+  };
+
+  function injectNav(){
+    try {
+      if (!isStaff()) return;
+      if (document.querySelector('.nav button[data-page="viescolaire"]')) return;
+      var nav = document.querySelector('.nav');
+      if (!nav) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-page', 'viescolaire');
+      btn.setAttribute('aria-label', 'Vie scolaire');
+      if (typeof page !== 'undefined' && page === 'viescolaire') btn.className = 'active';
+      btn.textContent = 'Vie scolaire';
+      btn.onclick = function(){ go('viescolaire'); };
+      var suivi = nav.querySelector('button[data-page="suivi"]');
+      if (suivi && suivi.nextSibling) suivi.parentNode.insertBefore(btn, suivi.nextSibling);
+      else if (suivi) suivi.parentNode.appendChild(btn);
+      else nav.appendChild(btn);
+    } catch (e) {}
+  }
+
+  var priorShell = window.shell;
+  if (typeof priorShell === 'function') {
+    window.shell = function(){
+      var h = priorShell.apply(this, arguments);
+      if (isStaff() && h.indexOf('data-page="viescolaire"') === -1) {
+        var i = h.indexOf('data-page="suivi"');
+        if (i !== -1) {
+          var close = h.indexOf('</button>', i);
+          if (close !== -1) {
+            h = h.slice(0, close) + '</button>\n        <button data-page="viescolaire" class="' + (typeof page !== 'undefined' && page === 'viescolaire' ? 'active' : '') + '" onclick="go(\'viescolaire\')" aria-label="Vie scolaire">Vie scolaire</button>' + h.slice(close + 9);
+          }
+        }
+      }
+      return h;
+    };
+  }
+
+  var priorRender = window.render;
+  if (typeof priorRender === 'function') {
+    window.render = function(){
+      var r = priorRender.apply(this, arguments);
+      setTimeout(injectNav, 0);
+      setTimeout(injectNav, 120);
+      return r;
+    };
+  }
+  setInterval(function(){ if (isStaff()) injectNav(); }, 2000);
+
+  try {
+    var title = document.querySelector('title');
+    if (title) title.textContent = 'Portail Parents — V2.3.116';
+  } catch (e) {}
+})();
+</script>
+
+<!-- V2.3.117 — Sprint 3 : sync multi-appareils, file d’attente, sauvegarde, menu admin cohérent -->
+<script id="pp23117-sprint3">
+(function(){
+  'use strict';
+  window.GESCO_VERSION = '2.3.117';
+  var OUTBOX_KEY = 'gesco_outbox_v1';
+  var AUTOBACKUP_KEY = 'gesco_autobackup_v1';
+
+  function escH(v){
+    return typeof esc === 'function' ? esc(String(v == null ? '' : v))
+      : String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+  }
+  function apiOn(){
+    return !!(state && state.api && state.api.enabled && state.api.baseUrl);
+  }
+  function fmtDate(iso){
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('fr-FR'); } catch (e) { return String(iso); }
+  }
+
+  /* ========== File d’attente hors ligne ========== */
+  function loadOutbox(){
+    try {
+      var raw = localStorage.getItem(OUTBOX_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function saveOutbox(arr){
+    try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(arr.slice(-200))); } catch (e) { console.warn('outbox full', e); }
+  }
+  function enqueue(type, payload){
+    var q = loadOutbox();
+    var item = {
+      id: 'ob-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      type: type,
+      payload: payload || {},
+      createdAt: new Date().toISOString(),
+      tries: 0,
+      status: 'pending',
+      lastError: ''
+    };
+    q.push(item);
+    saveOutbox(q);
+    if (typeof markLocalChange === 'function') markLocalChange();
+    return item;
+  }
+  window.PP_OUTBOX = { load: loadOutbox, enqueue: enqueue, flush: flushOutbox };
+
+  async function flushOutbox(silent){
+    if (!apiOn()) {
+      if (!silent) toast('Configurez le serveur central dans Profil pour synchroniser.');
+      return { ok: 0, fail: 0, skipped: true };
+    }
+    var q = loadOutbox();
+    var pending = q.filter(function(x){ return x.status === 'pending' || x.status === 'error'; });
+    if (!pending.length) {
+      if (!silent) toast('File d’attente vide');
+      return { ok: 0, fail: 0 };
+    }
+    var ok = 0, fail = 0;
+    for (var i = 0; i < pending.length; i++) {
+      var item = pending[i];
+      item.tries = (item.tries || 0) + 1;
+      try {
+        if (item.type === 'message' && item.payload && item.payload.id != null) {
+          var msg = (state.messages || []).find(function(m){ return String(m.id) === String(item.payload.id); });
+          if (msg && typeof publishMessageToServer === 'function') {
+            var published = await publishMessageToServer(msg);
+            if (!published) throw new Error('Publication message refusée');
+            msg.deliveryStatus = 'sent';
+            msg.sentAt = typeof nowStr === 'function' ? nowStr() : new Date().toISOString();
+          }
+        } else if (item.type === 'sync') {
+          if (typeof syncWithServer === 'function') {
+            var sOk = await syncWithServer(true);
+            if (!sOk) throw new Error('Sync serveur échouée');
+          }
+        }
+        item.status = 'synced';
+        item.syncedAt = new Date().toISOString();
+        item.lastError = '';
+        ok++;
+      } catch (e) {
+        item.status = 'error';
+        item.lastError = (e && e.message) || 'erreur';
+        fail++;
+      }
+    }
+    saveOutbox(q);
+    if (typeof save === 'function') save(false);
+    if (!silent) toast('File d’attente : ' + ok + ' OK, ' + fail + ' échec(s)');
+    return { ok: ok, fail: fail };
+  }
+
+  // Enqueue messages marked queued when offline
+  var priorPublish = window.publishMessageToServer;
+  if (typeof priorPublish === 'function') {
+    window.publishMessageToServer = async function(msg){
+      try {
+        if (!apiOn() || !(state.api && state.api.sessionToken)) {
+          if (msg) {
+            msg.deliveryStatus = msg.deliveryStatus || 'queued';
+            enqueue('message', { id: msg.id, subject: msg.subject });
+          }
+          return false;
+        }
+        var r = await priorPublish.apply(this, arguments);
+        if (!r && msg) enqueue('message', { id: msg.id, subject: msg.subject });
+        return r;
+      } catch (e) {
+        if (msg) enqueue('message', { id: msg.id, subject: msg.subject });
+        return false;
+      }
+    };
+  }
+
+  /* ========== Sauvegarde / restauration renforcées ========== */
+  function buildBackupPayload(){
+    return {
+      app: 'Portail_Parents',
+      version: '2.3.117',
+      exportedAt: new Date().toISOString(),
+      deviceId: (state.api && state.api.deviceId) || null,
+      counts: {
+        parents: (state.parents || []).length,
+        teachers: (state.teachers || []).length,
+        messages: (state.messages || []).length,
+        absences: (state.absences || []).length,
+        bulletins: (state.bulletins || []).length
+      },
+      state: state,
+      outbox: loadOutbox()
+    };
+  }
+
+  window.exportFullBackup = function(){
+    if (typeof requireSession === 'function' && !requireSession()) return;
+    var payload = buildBackupPayload();
+    var json = JSON.stringify(payload, null, 2);
+    var name = 'portail-parents-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    if (typeof downloadTextFile === 'function') {
+      downloadTextFile(name, json, 'application/json;charset=utf-8');
+    } else {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      a.download = name;
+      a.click();
+    }
+    state.lastBackupAt = new Date().toISOString();
+    try { localStorage.setItem(AUTOBACKUP_KEY, json); } catch (e) {}
+    try { if (typeof logActivity === 'function') logActivity('Export sauvegarde', name); } catch (e) {}
+    if (typeof save === 'function') save(false);
+    toast('Sauvegarde téléchargée (' + (payload.counts.messages) + ' messages, ' + payload.counts.parents + ' parents)');
+  };
+
+  window.doImportBackup = function(){
+    var input = document.getElementById('backupFile');
+    var f = input && input.files && input.files[0];
+    if (!f) return toast('Choisissez un fichier');
+    if (!confirm('Remplacer toutes les données locales par cette sauvegarde ? Une copie de secours sera tentée automatiquement.')) return;
+    // Auto-backup current before overwrite
+    try {
+      localStorage.setItem(AUTOBACKUP_KEY, JSON.stringify(buildBackupPayload()));
+    } catch (e) {}
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        var data = JSON.parse(reader.result);
+        var st = data.state || data;
+        if (!st || typeof st !== 'object') return toast('Fichier invalide');
+        if (!st.profiles && !st.parents && !st.messages) return toast('Structure non reconnue (profiles/parents manquants)');
+        var currentUser = state.user;
+        // Preserve API device settings if backup has empty api
+        var prevApi = state.api ? Object.assign({}, state.api) : null;
+        state = st;
+        if (!state.profiles) state.profiles = { admin: { name: 'Administrateur', password: '1234' } };
+        if (!Array.isArray(state.activityLog)) state.activityLog = [];
+        if (!Array.isArray(state.messages)) state.messages = [];
+        if (!Array.isArray(state.parents)) state.parents = [];
+        if (!Array.isArray(state.absences)) state.absences = [];
+        state.user = currentUser;
+        state.lastActivity = Date.now();
+        if (prevApi && (!state.api || !state.api.baseUrl)) {
+          state.api = Object.assign({}, prevApi, state.api || {});
+        }
+        if (Array.isArray(data.outbox)) saveOutbox(data.outbox);
+        if (typeof save === 'function') save();
+        try { if (typeof logActivity === 'function') logActivity('Restauration sauvegarde', f.name); } catch (e) {}
+        toast('Sauvegarde restaurée');
+        go('home');
+      } catch (e) {
+        console.error(e);
+        toast('Erreur de lecture JSON');
+      }
+    };
+    reader.readAsText(f, 'UTF-8');
+  };
+
+  window.restoreAutoBackup = function(){
+    if (typeof isAdmin === 'function' && !isAdmin()) return toast('Admin requis');
+    try {
+      var raw = localStorage.getItem(AUTOBACKUP_KEY);
+      if (!raw) return toast('Aucune sauvegarde automatique disponible');
+      if (!confirm('Restaurer la dernière sauvegarde automatique de ce navigateur ?')) return;
+      var data = JSON.parse(raw);
+      var st = data.state || data;
+      if (!st || typeof st !== 'object') return toast('Sauvegarde auto invalide');
+      var currentUser = state.user;
+      state = st;
+      state.user = currentUser;
+      if (typeof save === 'function') save();
+      toast('Sauvegarde automatique restaurée');
+      go('home');
+    } catch (e) {
+      toast('Impossible de restaurer la sauvegarde auto');
+    }
+  };
+
+  // Auto-backup périodique (toutes les 6 h d’activité max 1 fois)
+  function maybeAutoBackup(){
+    try {
+      var last = state.lastBackupAt ? new Date(state.lastBackupAt).getTime() : 0;
+      if (Date.now() - last < 6 * 3600 * 1000) return;
+      localStorage.setItem(AUTOBACKUP_KEY, JSON.stringify(buildBackupPayload()));
+      state.lastBackupAt = new Date().toISOString();
+      if (typeof save === 'function') save(false);
+    } catch (e) {}
+  }
+
+  /* ========== Sync centrale renforcée ========== */
+  window.portalForceSync = async function(){
+    if (!apiOn()) {
+      toast('Activez le serveur central dans Profil → Serveur');
+      go('profil');
+      return false;
+    }
+    toast('Synchronisation…');
+    var ok = false;
+    try {
+      if (typeof syncWithServer === 'function') ok = await syncWithServer(false);
+    } catch (e) { ok = false; }
+    await flushOutbox(true);
+    try { if (typeof retryPendingMessages === 'function') await retryPendingMessages(); } catch (e) {}
+    if (typeof render === 'function') render();
+    return ok;
+  };
+
+  /* ========== Page Maintenance (admin) ========== */
+  window.maintenanceView = function(){
+    if (typeof isAdmin !== 'function' || !isAdmin()) return '<div class="empty">Accès réservé à l’administration.</div>';
+    var a = state.api || {};
+    var q = loadOutbox();
+    var pending = q.filter(function(x){ return x.status === 'pending' || x.status === 'error'; }).length;
+    var synced = q.filter(function(x){ return x.status === 'synced'; }).length;
+    var status = typeof syncStatusLabel === 'function' ? syncStatusLabel() : '—';
+
+    return '<div class="panel-head"><div><h1>Maintenance</h1><p class="muted">Synchronisation multi-appareils, file d’attente hors ligne, sauvegardes et outils techniques.</p></div></div>'
+      + '<div class="stat-grid">'
+      + '<div class="stat-card"><div class="label">État sync</div><div class="value" style="font-size:18px">' + escH(status) + '</div><div class="sub">' + escH(fmtDate(a.lastSyncAt)) + '</div></div>'
+      + '<div class="stat-card"><div class="label">En attente</div><div class="value">' + pending + '</div><div class="sub">file hors ligne</div></div>'
+      + '<div class="stat-card"><div class="label">Synchronisées</div><div class="value">' + synced + '</div><div class="sub">opérations outbox</div></div>'
+      + '<div class="stat-card"><div class="label">Révision locale</div><div class="value" style="font-size:18px">' + escH(String(a.localRevision || 0)) + '</div><div class="sub">serveur : ' + escH(String(a.serverRevision || 0)) + '</div></div>'
+      + '</div>'
+      + '<div class="panel" style="margin-top:12px"><h3>Serveur central</h3>'
+      + '<p class="muted">' + (apiOn() ? ('URL : ' + escH(a.baseUrl)) : 'Mode local — configurez l’URL dans Profil pour partager les données entre téléphones.') + '</p>'
+      + (a.lastSyncError ? ('<p style="color:#b91c1c">' + escH(a.lastSyncError) + '</p>') : '')
+      + '<button type="button" class="btn primary" onclick="portalForceSync()">↻ Synchroniser maintenant</button> '
+      + '<button type="button" class="btn secondary" onclick="go(\'profil\')">Configurer le serveur</button> '
+      + '<button type="button" class="btn secondary" onclick="PP_OUTBOX.flush(false)">Vider la file d’attente</button>'
+      + '</div>'
+      + '<div class="panel" style="margin-top:12px"><h3>Sauvegarde & restauration</h3>'
+      + '<p class="muted">Dernière sauvegarde : ' + escH(fmtDate(state.lastBackupAt)) + '</p>'
+      + '<button type="button" class="btn primary" onclick="exportFullBackup()">⬇ Exporter une sauvegarde JSON</button> '
+      + '<button type="button" class="btn secondary" onclick="importFullBackup()">⬆ Restaurer depuis un fichier</button> '
+      + '<button type="button" class="btn secondary" onclick="restoreAutoBackup()">Récupérer la sauvegarde auto du navigateur</button>'
+      + '</div>'
+      + '<div class="panel" style="margin-top:12px"><h3>File d’attente (20 dernières)</h3><div class="list">'
+      + (q.slice().reverse().slice(0, 20).map(function(x){
+          return '<div class="item"><b>' + escH(x.status) + ' — ' + escH(x.type) + '</b>'
+            + '<p class="muted">' + escH(fmtDate(x.createdAt)) + (x.lastError ? ' · ' + escH(x.lastError) : '') + '</p></div>';
+        }).join('') || '<div class="empty">Aucune opération en file.</div>')
+      + '</div></div>'
+      + '<div class="panel" style="margin-top:12px"><h3>Outils techniques</h3>'
+      + '<button type="button" class="btn secondary" onclick="go(\'activity\')">Journal d’activité</button> '
+      + '<button type="button" class="btn secondary" onclick="go(\'controle\')">Diagnostic</button> '
+      + '<button type="button" class="btn secondary" onclick="go(\'bloc3\')">Messagerie avancée</button> '
+      + '<button type="button" class="btn secondary" onclick="go(\'sms\')">SMS / WhatsApp</button>'
+      + '</div>';
+  };
+
+  /* ========== Menu admin simplifié ========== */
+  var priorAccess = window.canAccessPage;
+  window.canAccessPage = function(p){
+    if (p === 'maintenance') return typeof isAdmin === 'function' && isAdmin();
+    return typeof priorAccess === 'function' ? priorAccess(p) : true;
+  };
+  var priorView = window.view;
+  window.view = function(){
+    if (typeof page !== 'undefined' && page === 'maintenance') return maintenanceView();
+    return typeof priorView === 'function' ? priorView.apply(this, arguments) : '';
+  };
+
+  function simplifyAdminNav(){
+    try {
+      if (typeof isAdmin !== 'function' || !isAdmin()) return;
+      var nav = document.querySelector('.nav');
+      if (!nav) return;
+      // Masquer outils techniques dans le menu principal
+      ['bloc2', 'bloc3', 'controle', 'activity', 'sms'].forEach(function(id){
+        nav.querySelectorAll('button[data-page="' + id + '"]').forEach(function(b){ b.style.display = 'none'; });
+      });
+      // Bouton Maintenance
+      if (!nav.querySelector('button[data-page="maintenance"]')) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-page', 'maintenance');
+        btn.setAttribute('aria-label', 'Maintenance');
+        if (typeof page !== 'undefined' && page === 'maintenance') btn.className = 'active';
+        btn.textContent = 'Maintenance';
+        btn.onclick = function(){ go('maintenance'); };
+        var profilBtn = nav.querySelector('button[data-page="profil"]');
+        if (profilBtn) nav.insertBefore(btn, profilBtn);
+        else nav.appendChild(btn);
+      }
+    } catch (e) {}
+  }
+
+  function syncChip(){
+    try {
+      var top = document.querySelector('.top');
+      if (!top) return;
+      var existing = document.getElementById('ppSyncChip');
+      if (typeof isAdmin === 'function' && !isAdmin() && typeof isSupervisor === 'function' && !isSupervisor()) {
+        if (existing) existing.remove();
+        return;
+      }
+      var label = typeof syncStatusLabel === 'function' ? syncStatusLabel() : 'Local';
+      var pending = loadOutbox().filter(function(x){ return x.status === 'pending' || x.status === 'error'; }).length;
+      var text = 'Sync : ' + label + (pending ? ' · ' + pending + ' en file' : '');
+      if (!existing) {
+        existing = document.createElement('button');
+        existing.id = 'ppSyncChip';
+        existing.type = 'button';
+        existing.className = 'btn secondary';
+        existing.style.cssText = 'padding:6px 10px;font-size:12px;white-space:nowrap';
+        existing.onclick = function(){
+          if (typeof isAdmin === 'function' && isAdmin()) go('maintenance');
+          else portalForceSync();
+        };
+        var user = top.querySelector('.user');
+        if (user) top.insertBefore(existing, user);
+        else top.appendChild(existing);
+      }
+      existing.textContent = text;
+      existing.title = (state.api && state.api.lastSyncError) || 'Cliquer pour synchroniser / maintenance';
+    } catch (e) {}
+  }
+
+  var priorShell = window.shell;
+  if (typeof priorShell === 'function') {
+    window.shell = function(){
+      var h = priorShell.apply(this, arguments);
+      if (typeof isAdmin === 'function' && isAdmin() && h.indexOf('data-page="maintenance"') === -1) {
+        var i = h.indexOf('data-page="profil"');
+        if (i !== -1) {
+          h = h.slice(0, i) + 'data-page="maintenance" class="' + (typeof page !== 'undefined' && page === 'maintenance' ? 'active' : '') + '" onclick="go(\'maintenance\')" aria-label="Maintenance">Maintenance</button>\n        <button ' + h.slice(i);
+        }
+      }
+      return h;
+    };
+  }
+
+  var priorRender = window.render;
+  if (typeof priorRender === 'function') {
+    window.render = function(){
+      var r = priorRender.apply(this, arguments);
+      setTimeout(function(){ simplifyAdminNav(); syncChip(); maybeAutoBackup(); }, 0);
+      return r;
+    };
+  }
+
+  // Flush outbox when back online
+  window.addEventListener('online', function(){
+    if (apiOn()) {
+      flushOutbox(true).then(function(){
+        if (typeof syncWithServer === 'function') syncWithServer(true);
+      });
+    }
+  });
+
+  // Periodic outbox + sync
+  setInterval(function(){
+    if (!apiOn() || (typeof document !== 'undefined' && document.hidden)) return;
+    flushOutbox(true);
+  }, 60000);
+
+  try {
+    var title = document.querySelector('title');
+    if (title) title.textContent = 'Portail Parents — V2.3.117';
+  } catch (e) {}
+})();
+</script>
+
+<!-- V2.3.118 — Sprint 4 : production (établissement, notifs ciblées, tableaux de bord, convocations imprimables) -->
+<script id="pp23118-sprint4">
+(function(){
+  'use strict';
+  window.GESCO_VERSION = '2.3.118';
+
+  function escH(v){
+    return typeof esc === 'function' ? esc(String(v == null ? '' : v))
+      : String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+  }
+  function roleOf(){
+    if (typeof isAdmin === 'function' && isAdmin()) return 'admin';
+    if (typeof isSupervisor === 'function' && isSupervisor()) return 'supervisor';
+    if (typeof isTeacher === 'function' && isTeacher()) return 'teacher';
+    if (state && state.user) return 'parent';
+    return null;
+  }
+  function school(){
+    if (!state.school || typeof state.school !== 'object') {
+      state.school = {
+        name: 'Collège Saint-Thomas de Manjo',
+        shortName: 'CST Manjo',
+        city: 'Manjo',
+        year: '2025-2026',
+        phone: '',
+        address: '',
+        motto: ''
+      };
+    }
+    return state.school;
+  }
+
+  /* ========== Notifications ciblées ========== */
+  var priorPush = window.pushNotif;
+  window.pushNotif = function(text, type, refType, refId, targets){
+    // targets: { parentId?, teacherId?, role?, userId? }
+    state.notifications = Array.isArray(state.notifications) ? state.notifications : [];
+    var n = {
+      id: Date.now() * 1000 + (state.notifications.length % 1000),
+      text: text,
+      date: typeof nowStr === 'function' ? nowStr() : new Date().toLocaleString('fr-FR'),
+      read: false,
+      type: type || 'info',
+      refType: refType || null,
+      refId: refId || null,
+      createdAt: new Date().toISOString(),
+      syncState: 'pending',
+      readAt: null,
+      readBy: {},
+      targetParentId: targets && targets.parentId != null ? targets.parentId : null,
+      targetTeacherId: targets && targets.teacherId != null ? targets.teacherId : null,
+      targetRole: targets && targets.role ? targets.role : null,
+      targetUserId: targets && targets.userId != null ? targets.userId : null
+    };
+    state.notifications.push(n);
+    try { if (typeof markLocalChange === 'function') markLocalChange(); } catch (e) {}
+    try { if (typeof logActivity === 'function') logActivity('Notification', text); } catch (e) {}
+    try {
+      var sch = school();
+      var title = (type === 'message' ? 'Nouveau message' : type === 'annonce' ? 'Annonce' : 'Notification') + ' — ' + (sch.shortName || 'Portail');
+      if (typeof showPush === 'function') showPush(title, text, 'pp-' + (refId || n.id));
+    } catch (e) {}
+    return n;
+  };
+
+  var priorVisNotif = window.visibleNotifications;
+  window.visibleNotifications = function(){
+    var all = (state.notifications || []).slice();
+    var role = roleOf();
+    if (role === 'admin') return all;
+    return all.filter(function(n){
+      if (!n) return false;
+      // Notifications sans cible = anciennes (visibles selon logique précédente)
+      var hasTarget = n.targetParentId != null || n.targetTeacherId != null || n.targetRole || n.targetUserId != null;
+      if (!hasTarget) {
+        return typeof priorVisNotif === 'function' ? (priorVisNotif() || []).some(function(x){ return x && String(x.id) === String(n.id); }) : true;
+      }
+      if (n.targetRole && n.targetRole === role) return true;
+      if (role === 'supervisor' && n.targetRole === 'supervisor') return true;
+      if (role === 'parent') {
+        var p = typeof currentParent === 'function' ? currentParent() : null;
+        if (p && n.targetParentId != null && String(n.targetParentId) === String(p.id)) return true;
+        if (p && n.targetUserId != null && String(n.targetUserId) === String(p.id)) return true;
+      }
+      if (role === 'teacher') {
+        var t = typeof currentTeacher === 'function' ? currentTeacher() : null;
+        if (t && n.targetTeacherId != null && String(n.targetTeacherId) === String(t.id)) return true;
+        if (t && n.targetUserId != null && String(n.targetUserId) === String(t.id)) return true;
+      }
+      return false;
+    });
+  };
+
+  /* ========== Établissement ========== */
+  window.etablissementView = function(){
+    if (typeof isAdmin !== 'function' || !isAdmin()) return '<div class="empty">Accès réservé à l’administration.</div>';
+    var s = school();
+    return '<div class="panel-head"><div><h1>Établissement</h1><p class="muted">Identité affichée sur le portail, les convocations et les notifications.</p></div></div>'
+      + '<div class="panel">'
+      + '<div class="field"><label>Nom complet</label><input id="schName" value="' + escH(s.name || '') + '"></div>'
+      + '<div class="field"><label>Nom court</label><input id="schShort" value="' + escH(s.shortName || '') + '"></div>'
+      + '<div class="field"><label>Année scolaire</label><input id="schYear" value="' + escH(s.year || '') + '" placeholder="2025-2026"></div>'
+      + '<div class="field"><label>Ville</label><input id="schCity" value="' + escH(s.city || '') + '"></div>'
+      + '<div class="field"><label>Téléphone</label><input id="schPhone" value="' + escH(s.phone || '') + '"></div>'
+      + '<div class="field"><label>Adresse</label><input id="schAddress" value="' + escH(s.address || '') + '"></div>'
+      + '<div class="field"><label>Devise / mention</label><input id="schMotto" value="' + escH(s.motto || '') + '"></div>'
+      + '<button type="button" class="btn primary" onclick="saveEtablissement()">Enregistrer</button>'
+      + '</div>';
+  };
+  window.saveEtablissement = function(){
+    if (typeof isAdmin !== 'function' || !isAdmin()) return;
+    var s = school();
+    s.name = ((document.getElementById('schName') || {}).value || '').trim() || s.name;
+    s.shortName = ((document.getElementById('schShort') || {}).value || '').trim() || s.shortName;
+    s.year = ((document.getElementById('schYear') || {}).value || '').trim();
+    s.city = ((document.getElementById('schCity') || {}).value || '').trim();
+    s.phone = ((document.getElementById('schPhone') || {}).value || '').trim();
+    s.address = ((document.getElementById('schAddress') || {}).value || '').trim();
+    s.motto = ((document.getElementById('schMotto') || {}).value || '').trim();
+    if (typeof save === 'function') save();
+    try { if (typeof logActivity === 'function') logActivity('Établissement', s.name); } catch (e) {}
+    toast('Paramètres établissement enregistrés');
+    go('etablissement');
+  };
+
+  /* ========== Impression convocation ========== */
+  window.printConvocation = function(opts){
+    opts = opts || {};
+    var s = school();
+    var parentName = opts.parentName || 'Madame, Monsieur';
+    var student = opts.student || '';
+    var dateAbs = opts.dateAbs || '';
+    var dateConv = opts.dateConv || '';
+    var timeConv = opts.timeConv || '';
+    var motif = opts.motif || 'suivi de la scolarité';
+    var w = window.open('', '_blank');
+    if (!w) return toast('Autorisez les pop-ups pour imprimer');
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Convocation</title>'
+      + '<style>body{font-family:Georgia,serif;max-width:720px;margin:40px auto;padding:20px;color:#111;line-height:1.5}'
+      + 'h1{font-size:20px;text-align:center;margin:0 0 8px}h2{font-size:16px;text-align:center;margin:0 0 24px;font-weight:normal}'
+      + '.meta{text-align:center;color:#444;margin-bottom:28px}.body{margin:24px 0;white-space:pre-wrap}'
+      + '.sign{margin-top:48px;display:flex;justify-content:space-between}.foot{margin-top:40px;font-size:12px;color:#666;text-align:center}'
+      + '@media print{body{margin:0}}</style></head><body>'
+      + '<h1>' + escH(s.name || 'Établissement') + '</h1>'
+      + '<h2>Convocation des parents</h2>'
+      + '<div class="meta">' + escH(s.address || '') + (s.city ? ' — ' + escH(s.city) : '') + (s.phone ? '<br>Tél. ' + escH(s.phone) : '')
+      + (s.year ? '<br>Année scolaire ' + escH(s.year) : '') + '</div>'
+      + '<p><b>À l’attention de :</b> ' + escH(parentName) + '</p>'
+      + (student ? ('<p><b>Concernant l’élève :</b> ' + escH(student) + '</p>') : '')
+      + '<div class="body">Madame, Monsieur,\n\nVous êtes convoqué(e) à un entretien concernant ' + escH(motif)
+      + (dateAbs ? (', suite aux faits constatés le ' + escH(dateAbs)) : '')
+      + '.\n\n'
+      + '<b>Date :</b> ' + escH(dateConv || '……………') + '\n'
+      + '<b>Heure :</b> ' + escH(timeConv || '……………') + '\n'
+      + '<b>Lieu :</b> ' + escH(s.name || 'l’établissement') + '\n\n'
+      + 'Votre présence est souhaitée. En cas d’empêchement, merci de contacter l’établissement'
+      + (s.phone ? (' au ' + escH(s.phone)) : '') + '.\n\n'
+      + 'Cordialement,</div>'
+      + '<div class="sign"><div></div><div>La direction / Vie scolaire<br><br><br>________________</div></div>'
+      + '<div class="foot">' + escH(s.shortName || '') + (s.motto ? ' — ' + escH(s.motto) : '') + '</div>'
+      + '<script>window.onload=function(){window.print()}<\/script></body></html>');
+    w.document.close();
+  };
+
+  // Depuis vie scolaire : imprimer après convocation
+  window.vsPrintConvocation = function(id){
+    var a = (state.absences || []).find(function(x){ return String(x.id) === String(id); });
+    if (!a) return toast('Enregistrement introuvable');
+    var parent = null;
+    try {
+      var name = String(a.student || '').toLowerCase();
+      parent = (state.parents || []).find(function(p){
+        var kids = Array.isArray(p.children) ? p.children : [];
+        if (!kids.length && p.student) kids = [{ name: p.student }];
+        return kids.some(function(c){ return String(typeof c === 'string' ? c : (c && c.name) || '').toLowerCase() === name; });
+      });
+    } catch (e) {}
+    printConvocation({
+      parentName: parent ? parent.name : 'Madame, Monsieur',
+      student: a.student,
+      dateAbs: a.date,
+      motif: a.type === 'retard' ? 'un retard' : 'une absence',
+      dateConv: '',
+      timeConv: ''
+    });
+  };
+
+  /* ========== Checklist production (admin home) ========== */
+  function readinessChecks(){
+    var s = school();
+    var api = state.api || {};
+    return [
+      { ok: !!(s.name && s.year), label: 'Établissement renseigné (nom + année)' },
+      { ok: (state.parents || []).filter(function(p){ return p && p.active !== false; }).length > 0, label: 'Au moins un parent actif' },
+      { ok: (state.classes || []).length > 0, label: 'Classes définies' },
+      { ok: (state.subjects || []).length > 0, label: 'Matières définies' },
+      { ok: !!(state.supervisor && state.supervisor.active !== false), label: 'Compte surveillant actif' },
+      { ok: !!(api.enabled && api.baseUrl), label: 'Serveur central configuré (multi-appareils)', optional: true },
+      { ok: !!(state.lastBackupAt), label: 'Au moins une sauvegarde exportée', optional: true }
+    ];
+  }
+
+  function homeExtras(){
+    var role = roleOf();
+    var html = '';
+    var s = school();
+    html += '<div class="panel" style="margin-bottom:12px"><div class="panel-head"><div><h3>' + escH(s.name || 'Portail Parents') + '</h3>'
+      + '<p class="muted">' + escH(s.year ? ('Année ' + s.year) : '') + (s.city ? (s.year ? ' · ' : '') + s.city : '') + '</p></div></div></div>';
+
+    if (role === 'admin') {
+      var checks = readinessChecks();
+      var done = checks.filter(function(c){ return c.ok; }).length;
+      html += '<div class="panel"><div class="panel-head"><h3>Mise en service (' + done + '/' + checks.length + ')</h3>'
+        + '<button type="button" class="btn secondary" onclick="go(\'etablissement\')">Établissement</button></div><div class="list">';
+      checks.forEach(function(c){
+        html += '<div class="item"><span class="' + (c.ok ? 'gesco41-ok' : (c.optional ? 'muted' : 'gesco41-bad')) + '">' + (c.ok ? '✓' : '○') + '</span> ' + escH(c.label) + '</div>';
+      });
+      html += '</div></div>';
+    }
+
+    if (role === 'supervisor' || role === 'admin') {
+      var abs = state.absences || [];
+      var open = abs.filter(function(a){ return (a.status || (a.justified ? 'justified' : 'open')) === 'open'; }).length;
+      var pending = abs.filter(function(a){ return a.status === 'pending'; }).length;
+      html += '<div class="panel"><div class="panel-head"><h3>Vie scolaire — à traiter</h3>'
+        + '<button type="button" class="btn primary" onclick="go(\'viescolaire\')">Ouvrir</button></div>'
+        + '<div class="cards"><div class="card"><span class="muted">Non justifiées</span><div class="num" style="color:#dc2626">' + open + '</div></div>'
+        + '<div class="card"><span class="muted">Justificatifs en attente</span><div class="num" style="color:#d97706">' + pending + '</div></div></div></div>';
+    }
+
+    if (role === 'parent') {
+      var p = typeof currentParent === 'function' ? currentParent() : null;
+      var abs = (state.absences || []).filter(function(a){
+        if (!p) return false;
+        var kids = Array.isArray(p.children) ? p.children : [];
+        if (!kids.length && p.student) kids = [{ name: p.student }];
+        return kids.some(function(c){ return String(typeof c === 'string' ? c : (c && c.name) || '') === String(a.student || ''); });
+      });
+      var open = abs.filter(function(a){ return (a.status || 'open') === 'open' || a.status === 'rejected'; }).length;
+      if (open) {
+        html += '<div class="panel" style="border-color:#f59e0b"><h3>Action requise</h3><p>' + open + ' absence(s) à justifier.</p>'
+          + '<button type="button" class="btn primary" onclick="window._suiviTab=\'absences\';go(\'suivi\')">Justifier maintenant</button></div>';
+      }
+    }
+
+    return html;
+  }
+
+  /* ========== Intégration navigation & rendu ========== */
+  var priorAccess = window.canAccessPage;
+  window.canAccessPage = function(p){
+    if (p === 'etablissement') return typeof isAdmin === 'function' && isAdmin();
+    return typeof priorAccess === 'function' ? priorAccess(p) : true;
+  };
+  var priorView = window.view;
+  window.view = function(){
+    if (typeof page !== 'undefined' && page === 'etablissement') return etablissementView();
+    var html = typeof priorView === 'function' ? priorView.apply(this, arguments) : '';
+    if (typeof page !== 'undefined' && page === 'home' && html) {
+      html = homeExtras() + html;
+    }
+    return html;
+  };
+
+  // Bouton impression sur cartes vie scolaire
+  var priorVie = window.vieScolaireView;
+  if (typeof priorVie === 'function') {
+    window.vieScolaireView = function(){
+      var html = priorVie.apply(this, arguments);
+      // Ajoute raccourci impression dans actions
+      if (html && html.indexOf('vsPrintConvocation') === -1) {
+        html = html.replace(/onclick="vsConvoquer\((\d+)\)">📋 Convoquer les parents<\/button>/g,
+          'onclick="vsConvoquer($1)">📋 Convoquer les parents</button> <button type="button" class="btn secondary" style="margin:4px 4px 0 0" onclick="vsPrintConvocation($1)">🖨 Imprimer convocation</button>');
+      }
+      return html;
+    };
+  }
+
+  function injectEtabNav(){
+    try {
+      if (typeof isAdmin !== 'function' || !isAdmin()) return;
+      var nav = document.querySelector('.nav');
+      if (!nav || nav.querySelector('button[data-page="etablissement"]')) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-page', 'etablissement');
+      btn.setAttribute('aria-label', 'Établissement');
+      if (typeof page !== 'undefined' && page === 'etablissement') btn.className = 'active';
+      btn.textContent = 'Établissement';
+      btn.onclick = function(){ go('etablissement'); };
+      var maint = nav.querySelector('button[data-page="maintenance"]');
+      var profil = nav.querySelector('button[data-page="profil"]');
+      if (maint) nav.insertBefore(btn, maint);
+      else if (profil) nav.insertBefore(btn, profil);
+      else nav.appendChild(btn);
+    } catch (e) {}
+  }
+
+  function hideDebugBanner(){
+    try {
+      var b = document.getElementById('ppVersionBanner');
+      if (b) b.style.display = 'none';
+    } catch (e) {}
+  }
+
+  function brandTitle(){
+    try {
+      var s = school();
+      var brand = document.querySelector('.brand .brand-text');
+      if (brand && s.shortName) brand.textContent = s.shortName;
+      document.title = (s.shortName || 'Portail Parents') + ' — V2.3.118';
+    } catch (e) {}
+  }
+
+  var priorRender = window.render;
+  if (typeof priorRender === 'function') {
+    window.render = function(){
+      var r = priorRender.apply(this, arguments);
+      setTimeout(function(){ injectEtabNav(); hideDebugBanner(); brandTitle(); }, 0);
+      return r;
+    };
+  }
+
+  // Lien depuis Maintenance
+  var priorMaint = window.maintenanceView;
+  if (typeof priorMaint === 'function') {
+    window.maintenanceView = function(){
+      var html = priorMaint.apply(this, arguments);
+      return html.replace(
+        '<h3>Outils techniques</h3>',
+        '<h3>Configuration</h3><button type="button" class="btn secondary" onclick="go(\'etablissement\')">Établissement</button> <button type="button" class="btn secondary" onclick="go(\'subjects\')">Matières</button><h3 style="margin-top:16px">Outils techniques</h3>'
+      );
+    };
+  }
+
+  try {
+    school();
+    var title = document.querySelector('title');
+    if (title) title.textContent = 'Portail Parents — V2.3.118';
   } catch (e) {}
 })();
 </script>
