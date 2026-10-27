@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { createStore } = require('./store');
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const SERVICE = 'portail-parents-server';
 const PORT = Number(process.env.PORT) || 3000;
 const MAX_BODY = (Number(process.env.MAX_BODY_MB) || 30) * 1024 * 1024;
@@ -106,6 +106,78 @@ function ensureAdmin() {
     db.accounts.admin = { id: 'admin', role: 'admin', refId: 'admin', name: 'Administration', usernames: [...new Set(['admin', username])], active: true, cred: hashPw(pass), srcHash: null };
     persist();
   }
+  ensureExtraAdmins();
+}
+
+/**
+ * Comptes administrateurs supplémentaires (principal, vice-principal, …).
+ *
+ * Variables d'environnement (Render) — au choix :
+ *
+ * 1) Liste compacte :
+ *    EXTRA_ADMINS=principal:MotDePassePrincipal,vice:MotDePasseVice
+ *    (identifiant:motdepasse séparés par des virgules)
+ *
+ * 2) Variables dédiées :
+ *    PRINCIPAL_USERNAME=principal   PRINCIPAL_PASSWORD=...
+ *    VICE_USERNAME=vice             VICE_PASSWORD=...
+ *
+ * Chaque compte a le rôle admin (mêmes droits que « admin »).
+ * Les noms d'affichage : PRINCIPAL_NAME / VICE_NAME (optionnel).
+ */
+function ensureExtraAdmins() {
+  const list = [];
+  const compact = String(process.env.EXTRA_ADMINS || '').trim();
+  if (compact) {
+    compact.split(',').forEach(part => {
+      const s = part.trim();
+      if (!s) return;
+      const i = s.indexOf(':');
+      if (i <= 0) return;
+      const user = s.slice(0, i).trim();
+      const pass = s.slice(i + 1).trim();
+      if (user && pass) list.push({ user, pass, name: user });
+    });
+  }
+  const pu = String(process.env.PRINCIPAL_USERNAME || 'principal').trim();
+  const pp = String(process.env.PRINCIPAL_PASSWORD || '').trim();
+  if (pp) list.push({ user: pu, pass: pp, name: String(process.env.PRINCIPAL_NAME || 'Principal').trim() || 'Principal' });
+  const vu = String(process.env.VICE_USERNAME || 'vice').trim();
+  const vp = String(process.env.VICE_PASSWORD || '').trim();
+  if (vp) list.push({ user: vu, pass: vp, name: String(process.env.VICE_NAME || 'Vice-principal').trim() || 'Vice-principal' });
+
+  let changed = false;
+  const force = process.env.RESET_ADMIN === 'true';
+  for (const item of list) {
+    const uname = norm(item.user);
+    if (!uname || uname === 'admin') continue;
+    const id = 'admin:' + uname;
+    let acc = db.accounts[id];
+    if (!acc || force) {
+      acc = db.accounts[id] = {
+        id,
+        role: 'admin',
+        refId: 'admin',
+        name: item.name || item.user,
+        usernames: [uname],
+        active: true,
+        cred: hashPw(item.pass),
+        srcHash: null
+      };
+      changed = true;
+      console.log('[ADMIN] Compte administrateur prêt :', uname, '(' + acc.name + ')');
+    } else {
+      // Mettre à jour le mot de passe si la variable change (optionnel via RESET_EXTRA_ADMINS)
+      if (process.env.RESET_EXTRA_ADMINS === 'true') {
+        acc.cred = hashPw(item.pass);
+        acc.name = item.name || acc.name;
+        acc.usernames = [uname];
+        acc.active = true;
+        changed = true;
+      }
+    }
+  }
+  if (changed) persist();
 }
 
 /* ---------- sessions et limitation de débit ---------- */
