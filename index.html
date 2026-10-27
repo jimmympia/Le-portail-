@@ -4915,7 +4915,7 @@ function teachersView(){
       + '<div class="item-head"><b>' + esc(t.name) + '</b>'
       + '<span class="badge">' + esc((t.subjects || []).join(", ") || "—") + '</span></div>'
       + '<p class="muted">Classes : ' + esc((t.classes || []).join(", ") || "toutes") + '</p>'
-      + (t.isPrincipal ? '<p class="badge">Professeur principal · ' + esc(t.principalClass || '') + '</p>' : '')
+      + ((t.isPrincipal || (t.principalClasses && t.principalClasses.length) || t.principalClass) ? '<p class="badge">Professeur principal · ' + esc((Array.isArray(t.principalClasses) && t.principalClasses.length ? t.principalClasses : (t.principalClass ? [t.principalClass] : [])).join(', ') || '—') + '</p>' : '')
       + '<p class="muted">' + esc(t.email || "") + ' · ' + esc(t.phone || "") + '</p>'
       + '<button class="btn secondary" onclick="editTeacher(' + t.id + ')">Modifier</button> '
       + '<button class="btn danger" onclick="deleteTeacher(' + t.id + ')">Supprimer</button>'
@@ -4973,17 +4973,33 @@ function saveTeacher(){
   var subjects = collectChecked("t-sub");
   var classes = collectChecked("t-cls");
   var isPrincipal = !!(document.getElementById("tIsPrincipal") && document.getElementById("tIsPrincipal").checked);
-  var principalClass = isPrincipal && document.getElementById("tPrincipalClass") ? document.getElementById("tPrincipalClass").value : "";
-  if (isPrincipal && !principalClass) return toast("Choisissez la classe unique dont le professeur sera titulaire");
-  if (isPrincipal && (state.teachers || []).some(function(x){ return x.isPrincipal && x.principalClass === principalClass; })) return toast("Cette classe a déjà un professeur principal");
-  if (isPrincipal && classes.indexOf(principalClass) === -1) classes.push(principalClass);
+  var principalClasses = [];
+  document.querySelectorAll(".t-principal-class:checked").forEach(function(cb){ if (cb.value) principalClasses.push(cb.value); });
+  if (!principalClasses.length && isPrincipal) {
+    var _selS = document.getElementById("tPrincipalClass");
+    if (_selS && _selS.value) principalClasses = [_selS.value];
+  }
+  var principalClass = principalClasses[0] || "";
+  if (isPrincipal && !principalClasses.length) return toast("Cochez au moins une classe titulaire");
+  principalClasses.forEach(function(pc){
+    (state.teachers || []).forEach(function(x){
+      if (!x) return;
+      if (x.principalClass === pc) x.principalClass = "";
+      if (Array.isArray(x.principalClasses)) x.principalClasses = x.principalClasses.filter(function(c){ return c !== pc; });
+      x.isPrincipal = !!(x.principalClass || (x.principalClasses && x.principalClasses.length));
+    });
+    if (classes.indexOf(pc) === -1) classes.push(pc);
+  });
   if (!name) return toast("Nom obligatoire");
   if (!subjects.length) return toast("Choisissez au moins une matière");
   hashPassword(password || "1234").then(function(h){
+    var _newId = Date.now();
     state.teachers.push({
-      id: Date.now(), active: true, name: name, email: email, phone: phone, password: h,
-      subjects: subjects, classes: classes, isPrincipal: isPrincipal, principalClass: principalClass
+      id: _newId, active: true, name: name, email: email, phone: phone, password: h,
+      subjects: subjects, classes: classes, isPrincipal: isPrincipal, principalClass: principalClass, principalClasses: (typeof principalClasses !== "undefined" ? principalClasses.slice() : (principalClass ? [principalClass] : []))
     });
+    if (!state.classPrincipals) state.classPrincipals = {};
+    (principalClasses || []).forEach(function(pc){ state.classPrincipals[pc] = _newId; });
     save();
     toast("Enseignant ajouté — connexion : " + name + " / (mot de passe choisi)");
     go("teachers");
@@ -5029,10 +5045,27 @@ function updateTeacher(id){
   t.subjects = collectChecked("t-sub");
   t.classes = collectChecked("t-cls");
   t.isPrincipal = !!(document.getElementById("tIsPrincipal") && document.getElementById("tIsPrincipal").checked);
-  t.principalClass = t.isPrincipal && document.getElementById("tPrincipalClass") ? document.getElementById("tPrincipalClass").value : "";
-  if (t.isPrincipal && !t.principalClass) return toast("Choisissez la classe unique dont le professeur sera titulaire");
-  if (t.isPrincipal && (state.teachers || []).some(function(x){ return x.id !== id && x.isPrincipal && x.principalClass === t.principalClass; })) return toast("Cette classe a déjà un professeur principal");
-  if (t.isPrincipal && t.classes.indexOf(t.principalClass) === -1) t.classes.push(t.principalClass);
+  var principalClasses = [];
+  document.querySelectorAll(".t-principal-class:checked").forEach(function(cb){ if (cb.value) principalClasses.push(cb.value); });
+  if (!principalClasses.length && t.isPrincipal) {
+    var _selU = document.getElementById("tPrincipalClass");
+    if (_selU && _selU.value) principalClasses = [_selU.value];
+  }
+  t.principalClasses = principalClasses.slice();
+  t.principalClass = principalClasses[0] || "";
+  if (t.isPrincipal && !principalClasses.length) return toast("Cochez au moins une classe titulaire");
+  principalClasses.forEach(function(pc){
+    (state.teachers || []).forEach(function(x){
+      if (!x || x.id === id) return;
+      if (x.principalClass === pc) x.principalClass = "";
+      if (Array.isArray(x.principalClasses)) x.principalClasses = x.principalClasses.filter(function(c){ return c !== pc; });
+      x.isPrincipal = !!(x.principalClass || (x.principalClasses && x.principalClasses.length));
+    });
+    if (t.classes.indexOf(pc) === -1) t.classes.push(pc);
+    if (!state.classPrincipals) state.classPrincipals = {};
+    state.classPrincipals[pc] = id;
+  });
+  t.isPrincipal = principalClasses.length > 0;
   if (!t.name) return toast("Nom obligatoire");
   if (!t.subjects.length) return toast("Au moins une matière");
   function doneT(){ save(); toast("Enseignant mis à jour"); go("teachers"); }
@@ -9865,6 +9898,29 @@ window.__ppServerReady = (function(){
       if (!Array.isArray(t.principalClasses)) t.principalClasses = t.principalClass ? [t.principalClass] : [];
     });
   } catch (e) {}
+
+  // Corrige l'affichage liste si une seule classe apparaît
+  var _pr = window.render;
+  if (typeof _pr === 'function' && !window.__ppMultiPrincipalDisplay) {
+    window.__ppMultiPrincipalDisplay = true;
+    window.render = function(){
+      var r = _pr.apply(this, arguments);
+      setTimeout(function(){
+        try {
+          if (typeof page !== 'undefined' && page === 'teachers') {
+            (state.teachers || []).forEach(function(t){
+              var pcs = window.principalClassesOf ? window.principalClassesOf(t) : (t.principalClasses || []);
+              if (!pcs.length && t.principalClass) pcs = [t.principalClass];
+              if (pcs.length > 1) {
+                // déjà affiché via template mis à jour
+              }
+            });
+          }
+        } catch (e) {}
+      }, 0);
+      return r;
+    };
+  }
 })();
 </script>
 
