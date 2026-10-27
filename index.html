@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Portail Parents">
 <script>if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<title>Portail Parents — V2.3.122</title>
+<title>Portail Parents — V2.3.123</title>
 <style>
 *{box-sizing:border-box}
 :root{
@@ -203,7 +203,39 @@ body.dark .sms-failed{background:#450a0a;color:#fca5a5}
 <style id="gesco41css">
 /* Bloc 4 — Étape 31 : stabilisation mobile */
 .gesco41-wrap{margin:14px 0}.gesco41-panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 4px 18px #0000000a}.gesco41-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.gesco41-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}.gesco41-row:last-child{border-bottom:0}.gesco41-ok{color:#16803c;font-weight:700}.gesco41-bad{color:#b42318;font-weight:700}.gesco41-muted{color:var(--muted);font-size:.9rem}.gesco41-btn{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:10px;padding:9px 11px;cursor:pointer}.gesco41-btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}@media(max-width:520px){.gesco41-grid{grid-template-columns:1fr}.gesco41-panel{padding:13px}.gesco41-row{align-items:flex-start;flex-direction:column}.gesco41-row>span:last-child{align-self:flex-end}}
-</style></head>
+</style>
+<style id="pp-ui-polish">
+/* Interface épurée */
+.panel{box-shadow:none}
+.panel-head h1{font-size:1.35rem;letter-spacing:-0.02em}
+.panel-head .muted{margin-top:2px}
+.item{transition:background .15s ease,border-color .15s ease}
+.btn{min-height:42px;border-radius:11px;font-weight:700}
+.btn.secondary{background:transparent;border:1px solid var(--border);color:var(--text)}
+.field label{font-size:12px;font-weight:700;color:var(--muted);text-transform:none;letter-spacing:0}
+.field input,.field select,.field textarea{border-radius:11px;min-height:44px}
+.nav button{cursor:pointer;pointer-events:auto;-webkit-tap-highlight-color:transparent}
+.nav button:active{opacity:.85}
+.topbar{gap:10px}
+.pp-backbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.pp-backbar .btn{min-height:40px;padding:8px 14px}
+.cal-day{cursor:pointer;min-height:72px;border-radius:10px;transition:background .12s,box-shadow .12s}
+.cal-day:hover{background:var(--primary-soft)}
+.cal-day.selected{outline:2px solid var(--primary);background:var(--primary-soft)}
+.cal-day.other{cursor:default;opacity:.35}
+.cal-day .num{font-weight:800}
+.cal-day .ev{display:block;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;padding:1px 4px;border-radius:4px;background:rgba(30,58,138,.12)}
+.cal-day .ev.urgent{background:#fef3c7;color:#b45309}
+.pp-day-panel{margin-top:14px}
+.pp-day-panel .empty{padding:18px}
+@media (max-width:800px){
+  .content{padding:16px}
+  .panel{padding:16px;border-radius:14px}
+  .cards{grid-template-columns:1fr 1fr;gap:10px}
+}
+</style>
+
+</head>
 <body>
 <div id="root"><div style="padding:40px;font-family:sans-serif;color:#68758a;text-align:center">Chargement de Portail Parents…</div></div>
 <noscript><div style="padding:40px;font-family:sans-serif"><h2>JavaScript requis</h2><p>Activez JavaScript pour utiliser le portail de communication.</p></div></noscript>
@@ -306,7 +338,13 @@ async function apiRequest(path, options){
       save(false);
       if (!window._ppSessionToast || Date.now() - window._ppSessionToast > 600000) { window._ppSessionToast = Date.now(); try { toast("Session expirée : déconnectez-vous puis reconnectez-vous pour synchroniser"); } catch(e) {} }
     }
-    throw new Error((data && data.error) || ("HTTP " + response.status));
+    var msg = (data && (data.error || data.message)) || text || ("Erreur " + response.status);
+    if (typeof msg === "string" && msg.length > 180) msg = msg.slice(0, 180) + "…";
+    if (response.status === 400 && (!data || !data.error)) {
+      msg = "Requête refusée (400). Vérifiez les champs ou reconnectez-vous, puis synchronisez.";
+    }
+    if (state && state.api) state.api.lastSyncError = String(msg);
+    throw new Error(String(msg));
   }
   return data;
 }
@@ -3821,10 +3859,14 @@ function eventsView(){
     var evHtml = evs.map(function(e){
       return '<span class="ev' + (e.urgent ? ' urgent' : '') + '" title="' + esc(e.title) + '" onclick="event.stopPropagation();showEvent(' + e.id + ')">' + esc(e.title) + '</span>';
     }).join("");
-    cells += '<div class="cal-day' + (isToday ? ' today' : '') + '"><div class="num">' + d + '</div>' + evHtml + '</div>';
+    var selected = window._selectedCalDate === ds;
+    cells += '<div class="cal-day' + (isToday ? ' today' : '') + (selected ? ' selected' : '') + '" data-date="' + ds + '" role="button" tabindex="0" onclick="selectCalDate(\'' + ds + '\')"><div class="num">' + d + '</div>' + evHtml + '</div>';
   }
 
   var listUpcoming = (state.events || []).slice().sort(function(a, b){ return a.date < b.date ? -1 : 1; });
+  if (window._selectedCalDate) {
+    listUpcoming = listUpcoming.filter(function(e){ return e.date === window._selectedCalDate; });
+  }
 
   var listHtml = listUpcoming.map(function(e){
     return '<div class="event-item' + (e.urgent ? ' urgent' : '') + ' clickable" onclick="showEvent(' + e.id + ')">'
@@ -3837,8 +3879,28 @@ function eventsView(){
       + '</div>';
   }).join("") || empty();
 
+  var dayPanel = '';
+  if (window._selectedCalDate) {
+    var dsSel = window._selectedCalDate;
+    var label = dsSel;
+    try {
+      var pp = dsSel.split('-');
+      label = pp[2] + '/' + pp[1] + '/' + pp[0];
+    } catch (e) {}
+    var nEv = (state.events || []).filter(function(e){ return e && e.date === dsSel; }).length;
+    dayPanel = '<div class="panel pp-day-panel" style="margin-top:16px">'
+      + '<div class="panel-head"><div><h3 style="margin:0">Jour sélectionné — ' + esc(label) + '</h3>'
+      + '<p class="muted">' + nEv + ' événement(s) · Touchez une autre date pour changer</p></div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      + (admin ? '<button type="button" class="btn primary" onclick="newEventOnDate(\'' + dsSel + '\')">+ Événement ce jour</button>' : '')
+      + '<button type="button" class="btn secondary" onclick="clearCalDate()">Toutes les dates</button>'
+      + '</div></div>'
+      + (listUpcoming.length ? listHtml : '<div class="empty">Aucun événement ce jour.' + (admin ? ' Créez-en un avec le bouton ci-dessus.' : '') + '</div>')
+      + '</div>';
+  }
+
   return '<div class="panel-head">'
-    + '<div><h1>Calendrier</h1><p class="muted">Événements et dates importantes du collège.</p></div>'
+    + '<div><h1>Calendrier</h1><p class="muted">Touchez une date pour voir ou créer un événement.</p></div>'
     + (admin ? '<button class="btn primary" onclick="newEvent()">+ Nouvel événement</button>' : '')
     + '</div>'
     + '<div class="panel">'
@@ -3849,11 +3911,29 @@ function eventsView(){
     + '</div>'
     + '<div class="cal-grid">' + cells + '</div>'
     + '</div>'
-    + '<div class="panel" style="margin-top:16px">'
+    + dayPanel
+    + (window._selectedCalDate ? '' : ('<div class="panel" style="margin-top:16px">'
     + '<div class="panel-head"><h3>Liste des événements</h3></div>'
     + listHtml
-    + '</div>';
+    + '</div>'));
 }
+
+window.selectCalDate = function(ds){
+  window._selectedCalDate = ds;
+  go('events');
+};
+window.clearCalDate = function(){
+  window._selectedCalDate = null;
+  go('events');
+};
+window.newEventOnDate = function(ds){
+  window._selectedCalDate = ds || window._selectedCalDate;
+  newEvent();
+  setTimeout(function(){
+    var el = document.getElementById('evDate');
+    if (el && window._selectedCalDate) el.value = window._selectedCalDate;
+  }, 30);
+};
 
 function calPrev(){
   window._calMonth--;
@@ -9921,6 +10001,261 @@ window.__ppServerReady = (function(){
       return r;
     };
   }
+})();
+</script>
+
+<script id="pp-err400">
+(function(){
+  var prior = window.syncWithServer;
+  if (typeof prior === 'function') {
+    window.syncWithServer = async function(silent){
+      try {
+        return await prior.apply(this, arguments);
+      } catch (e) {
+        var m = (e && e.message) ? e.message : String(e);
+        if (!silent) try { toast(m); } catch (x) {}
+        if (state && state.api) { state.api.lastSyncError = m; try { save(false); } catch (y) {} }
+        throw e;
+      }
+    };
+  }
+})();
+</script>
+
+<!-- V2.3.123 — Calendrier cliquable + retour + UI épurée -->
+<script id="pp23123-ux">
+(function(){
+  'use strict';
+  window.GESCO_VERSION = '2.3.123';
+  window._navHistory = window._navHistory || [];
+  window._selectedCalDate = window._selectedCalDate || null;
+
+  function escH(v){
+    return typeof esc === 'function' ? esc(String(v == null ? '' : v))
+      : String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+  }
+
+  // ---------- Navigation + historique / retour ----------
+  var priorGo = window.go;
+  window.go = function(p){
+    try {
+      if (typeof page !== 'undefined' && page && page !== p) {
+        var h = window._navHistory;
+        if (!h.length || h[h.length - 1] !== page) h.push(page);
+        if (h.length > 30) h.shift();
+      }
+    } catch (e) {}
+    if (typeof priorGo === 'function') return priorGo.apply(this, arguments);
+  };
+
+  window.goBack = function(){
+    var h = window._navHistory || [];
+    var prev = h.pop();
+    if (prev) {
+      if (typeof priorGo === 'function') priorGo(prev);
+      else if (typeof go === 'function') go(prev);
+    } else {
+      if (typeof priorGo === 'function') priorGo('home');
+      else go('home');
+    }
+  };
+
+  function pagesWithBack(){
+    return true; // toutes sauf home
+  }
+
+  function injectBackBar(){
+    try {
+      if (typeof page === 'undefined' || page === 'home' || page === 'login') return;
+      var content = document.querySelector('.content');
+      if (!content) return;
+      if (content.querySelector('.pp-backbar')) return;
+      var bar = document.createElement('div');
+      bar.className = 'pp-backbar';
+      bar.innerHTML = '<button type="button" class="btn secondary" id="ppBtnBack">← Retour</button>'
+        + '<button type="button" class="btn secondary" id="ppBtnHome">Accueil</button>';
+      content.insertBefore(bar, content.firstChild);
+      var b1 = document.getElementById('ppBtnBack');
+      var b2 = document.getElementById('ppBtnHome');
+      if (b1) b1.onclick = function(){ window.goBack(); };
+      if (b2) b2.onclick = function(){ window._navHistory = []; go('home'); };
+    } catch (e) {}
+  }
+
+  // ---------- Menus / nav cliquables ----------
+  function fixNavClicks(){
+    try {
+      document.querySelectorAll('.nav button[data-page]').forEach(function(btn){
+        btn.style.pointerEvents = 'auto';
+        btn.style.cursor = 'pointer';
+        if (btn._ppNav) return;
+        btn._ppNav = true;
+        btn.addEventListener('click', function(ev){
+          var pg = btn.getAttribute('data-page');
+          if (!pg) return;
+          // laisser aussi onclick inline si présent
+          if (!btn.getAttribute('onclick') && typeof go === 'function') {
+            ev.preventDefault();
+            go(pg);
+          }
+        }, true);
+      });
+      // Liens morts
+      document.querySelectorAll('a[href="#"], a[href=""]').forEach(function(a){
+        a.addEventListener('click', function(e){ e.preventDefault(); });
+      });
+    } catch (e) {}
+  }
+
+  // ---------- Calendrier : clic sur une date ----------
+  window.selectCalDate = function(ds){
+    window._selectedCalDate = ds;
+    if (typeof go === 'function') go('events');
+  };
+
+  window.newEventOnDate = function(ds){
+    window._selectedCalDate = ds || window._selectedCalDate;
+    if (typeof newEvent === 'function') {
+      newEvent();
+      setTimeout(function(){
+        var d = document.getElementById('evDate') || document.querySelector('input[type="date"]');
+        if (d && window._selectedCalDate) d.value = window._selectedCalDate;
+      }, 50);
+    } else {
+      toast('Création d’événement indisponible');
+    }
+  };
+
+  function eventsForDate(ds){
+    return (state.events || []).filter(function(e){ return e && e.date === ds; })
+      .sort(function(a, b){ return String(a.time || '') < String(b.time || '') ? -1 : 1; });
+  }
+
+  function dayDetailHtml(ds){
+    if (!ds) return '';
+    var admin = typeof isAdmin === 'function' && isAdmin();
+    var list = eventsForDate(ds);
+    var items = list.map(function(e){
+      return '<div class="item clickable" onclick="showEvent(' + e.id + ')">'
+        + '<div class="item-head"><b>' + escH(e.title) + '</b>'
+        + (e.urgent ? '<span class="badge badge-new">Important</span>' : '') + '</div>'
+        + '<p class="muted">' + escH(e.time || 'Toute la journée')
+        + (e.place ? ' · ' + escH(e.place) : '') + '</p>'
+        + '<div>' + escH(e.desc || '') + '</div></div>';
+    }).join('') || '<div class="empty">Aucun événement ce jour.</div>';
+    var label = ds;
+    try {
+      var parts = ds.split('-');
+      label = parts[2] + '/' + parts[1] + '/' + parts[0];
+    } catch (e) {}
+    return '<div class="panel pp-day-panel" id="ppDayDetail">'
+      + '<div class="panel-head"><div><h3 style="margin:0">Jour sélectionné — ' + escH(label) + '</h3>'
+      + '<p class="muted">' + list.length + ' événement(s)</p></div>'
+      + (admin ? '<button type="button" class="btn primary" onclick="newEventOnDate(\'' + escH(ds) + '\')">+ Événement ce jour</button>' : '')
+      + '</div>' + items + '</div>';
+  }
+
+  function enhanceCalendar(){
+    try {
+      if (typeof page === 'undefined' || page !== 'events') return;
+      var grid = document.querySelector('.cal-grid');
+      if (!grid || grid._ppCal) return;
+      grid._ppCal = true;
+      var year = window._calYear;
+      var month = window._calMonth;
+      if (year == null || month == null) {
+        var now = new Date();
+        year = now.getFullYear(); month = now.getMonth();
+      }
+      var days = grid.querySelectorAll('.cal-day:not(.other)');
+      var dayNum = 0;
+      days.forEach(function(cell){
+        var numEl = cell.querySelector('.num');
+        if (!numEl) return;
+        var d = parseInt(numEl.textContent, 10);
+        if (!d) return;
+        var ds = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        cell.setAttribute('data-date', ds);
+        cell.setAttribute('role', 'button');
+        cell.setAttribute('tabindex', '0');
+        if (window._selectedCalDate === ds) cell.classList.add('selected');
+        cell.addEventListener('click', function(ev){
+          if (ev.target && ev.target.classList && ev.target.classList.contains('ev')) return;
+          window._selectedCalDate = ds;
+          grid.querySelectorAll('.cal-day.selected').forEach(function(c){ c.classList.remove('selected'); });
+          cell.classList.add('selected');
+          var host = document.getElementById('ppDayDetail');
+          var html = dayDetailHtml(ds);
+          if (host) host.outerHTML = html;
+          else {
+            var panels = document.querySelectorAll('.content .panel');
+            if (panels.length) {
+              var last = panels[panels.length - 1];
+              last.insertAdjacentHTML('afterend', html);
+            } else {
+              var content = document.querySelector('.content');
+              if (content) content.insertAdjacentHTML('beforeend', html);
+            }
+          }
+        });
+      });
+      // Afficher le détail si date déjà sélectionnée
+      if (window._selectedCalDate) {
+        var exists = document.getElementById('ppDayDetail');
+        if (!exists) {
+          var content = document.querySelector('.content');
+          if (content) content.insertAdjacentHTML('beforeend', dayDetailHtml(window._selectedCalDate));
+        }
+        var sel = grid.querySelector('.cal-day[data-date="' + window._selectedCalDate + '"]');
+        if (sel) sel.classList.add('selected');
+      }
+    } catch (e) { console.warn(e); }
+  }
+
+  // Préremplir date dans newEvent
+  var priorNewEvent = window.newEvent;
+  if (typeof priorNewEvent === 'function') {
+    window.newEvent = function(){
+      priorNewEvent.apply(this, arguments);
+      setTimeout(function(){
+        var d = document.getElementById('evDate') || document.querySelector('input[type="date"]');
+        if (d && window._selectedCalDate && !d.value) d.value = window._selectedCalDate;
+      }, 40);
+    };
+  }
+
+  // Boutons génériques sans handler
+  function auditButtons(){
+    try {
+      document.querySelectorAll('button.btn, button[onclick]').forEach(function(b){
+        b.style.pointerEvents = 'auto';
+        b.style.cursor = 'pointer';
+      });
+    } catch (e) {}
+  }
+
+  var priorRender = window.render;
+  if (typeof priorRender === 'function') {
+    window.render = function(){
+      var r = priorRender.apply(this, arguments);
+      setTimeout(function(){
+        injectBackBar();
+        fixNavClicks();
+        enhanceCalendar();
+        auditButtons();
+      }, 0);
+      return r;
+    };
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){
+      injectBackBar(); fixNavClicks(); enhanceCalendar();
+    });
+  }
+
+  try {
+    var t = document.querySelector('title');
+    if (t) t.textContent = (t.textContent || '').replace(/V2\.3\.\d+/, 'V2.3.123') || 'Portail Parents — V2.3.123';
+  } catch (e) {}
 })();
 </script>
 
