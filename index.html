@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="application-name" content="Portail Parents">
-<meta name="theme-color" content="#1e3a8a">
+<meta name="theme-color" content="#0a1b4a">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Portail Parents">
 <script>if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<title>Portail Parents — V2.3.124</title>
+<title>Portail Parents — V2.3.129</title>
 <style>
 *{box-sizing:border-box}
 :root{
@@ -238,7 +238,7 @@ body.dark .sms-failed{background:#450a0a;color:#fca5a5}
 
 <style id="pp-pro-ui">
 /* ========== Portail Parents — UI professionnelle V2.3.124 ========== */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* police système : aucun téléchargement */
 
 :root{
   --bg:#f1f5f9;
@@ -605,7 +605,7 @@ function syncStatusLabel(){
 }
 
 var PP_SYNC_ARRAYS = ["teachers","parents","classes","subjects","sequences","templates","events","annonces","students","messages","bulletins","bulletinRequests","bulletinHistory","grades","absences"];
-var PP_SYNC_OBJECTS = ["classPrincipals","supervisor","profiles","smsSettings","whatsappSettings"];
+var PP_SYNC_OBJECTS = ["classPrincipals","supervisor","profiles","smsSettings","whatsappSettings","school"];
 var PP_SHARED = ["messages","bulletins","bulletinRequests","bulletinHistory","grades","absences"];
 function syncPayload(){
   var o = {};
@@ -801,7 +801,7 @@ function defaultState(){
     ],
     events: [],
     subjects: ["Mathématiques","Français","Anglais","Histoire-Géo","SVT","Physique-Chimie","EPS","Informatique","Philosophie"],
-    sequences: ["Séquence 1","Séquence 2","Séquence 3","Trimestre 1"],
+    sequences: ["Séquence 1","Séquence 2","Séquence 3","Séquence 4","Séquence 5","Séquence 6"],
     grades: [],
     absences: [],
     bulletins: []
@@ -4474,7 +4474,7 @@ function suiviView(){
     + '<div class="child-tabs">' + tabs + '</div>'
     + '<div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
     + subTabs
-    + ' <button class="btn secondary" onclick="printStudentRecap(' + JSON.stringify(child.name) + ', ' + JSON.stringify(child.className || '') + ')">🖨 Récapitulatif</button>'
+    + ' <button class="btn secondary" onclick="printStudentRecap(' + esc(JSON.stringify(child.name)) + ', ' + esc(JSON.stringify(child.className || '')) + ')">🖨 Récapitulatif</button>'
     + '</div>'
     + body;
 }
@@ -6408,7 +6408,7 @@ try { applyTheme(); render(); } catch (bootErr) {
     var admin=isAdmin(), p=currentParent(), allowed=myClasses();
     var list=(state.bulletins||[]).filter(function(b){return admin||allowed.indexOf(b.className)!==-1;});
     return '<h2>Bulletins séquentiels</h2><p class="muted">L’administration importe les bulletins dès leur disponibilité. Les parents téléchargent uniquement ceux des classes de leurs enfants.</p>'+
-    (admin?'<div class="panel"><h3>Importer un bulletin</h3><div class="field"><label>Classe</label><select id="bpClass">'+(state.classes||[]).map(function(c){return '<option>'+escx(c)+'</option>'}).join('')+'</select></div><div class="field"><label>Séquence</label><select id="bpSeq"><option>Séquence 1</option><option>Séquence 2</option><option>Séquence 3</option><option>Trimestre 1</option><option>Trimestre 2</option><option>Trimestre 3</option></select></div><div class="field"><label>Fichier PDF du bulletin</label><input id="bpFile" type="file" accept=".pdf,application/pdf"></div><button class="btn primary" onclick="portalImportBulletin()">Importer et publier</button></div>':'')+
+    (admin?'<div class="panel"><h3>Importer un bulletin</h3><div class="field"><label>Classe</label><select id="bpClass">'+(state.classes||[]).map(function(c){return '<option>'+escx(c)+'</option>'}).join('')+'</select></div><div class="field"><label>Séquence</label><select id="bpSeq"><option>Séquence 1</option><option>Séquence 2</option><option>Séquence 3</option><option>Séquence 4</option><option>Séquence 5</option><option>Séquence 6</option><option>Trimestre 1</option><option>Trimestre 2</option><option>Trimestre 3</option></select></div><div class="field"><label>Fichier PDF du bulletin</label><input id="bpFile" type="file" accept=".pdf,application/pdf"></div><button class="btn primary" onclick="portalImportBulletin()">Importer et publier</button></div>':'')+
     '<div class="panel"><h3>Bulletins disponibles</h3>'+(list.length?list.map(function(b){return '<div class="item"><b>'+escx(b.sequence||'Bulletin séquentiel')+' — '+escx(b.className)+'</b><p class="muted">'+escx(b.name||'Bulletin PDF')+' · '+escx(b.date||'')+'</p>'+(b.data?'<button class="btn secondary" onclick="portalDownloadBulletin('+Number(b.id)+')">Télécharger le PDF</button>':'<span class="muted">Bulletin enregistré sans fichier joint.</span>')+'</div>'}).join(''):'<div class="empty">Aucun bulletin disponible pour vos classes.</div>')+'</div>';
   }
   window.portalImportBulletin=function(){
@@ -7201,7 +7201,7 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
   function entries(){ try { return window.__ppPrincipalEntriesReliable ? (window.__ppPrincipalEntriesReliable() || []) : []; } catch (e) { return []; } }
   window.ppBcSeq = window.ppBcSeq || "Séquence 1";
   function panel(){
-    var seqs = ["Séquence 1", "Séquence 2", "Séquence 3", "Séquence 4"], ents = entries();
+    var seqs = ["Séquence 1","Séquence 2","Séquence 3","Séquence 4","Séquence 5","Séquence 6","Trimestre 1","Trimestre 2","Trimestre 3"], ents = entries();
     var h = '<div class="panel"><h3>Distribuer aux professeurs principaux</h3><p class="muted">Importez le PDF officiel de chaque classe : il est envoyé directement au professeur principal de la classe, qui le télécharge.</p>';
     h += '<div class="field"><label>Séquence</label><select onchange="window.ppBcSeq=this.value;render()">' + seqs.map(function(q){ return '<option' + (q === window.ppBcSeq ? " selected" : "") + '>' + esc(q) + '</option>'; }).join("") + '</select></div>';
     if (!ents.length) h += '<p class="empty">Aucun professeur principal n’est affecté. Ouvrez « Professeurs principaux » pour en désigner un par classe.</p>';
@@ -7327,18 +7327,22 @@ body[data-pp-role="admin"][data-pp-page="profil"] #stage36Host,body[data-pp-role
 })();
 </script>
 <script id="pp-server-autoconfig">
+window.__ppServerOk = null;
 window.__ppServerReady = (function(){
-  if (!/^https?:$/.test(location.protocol)) return Promise.resolve();
-  return fetch("api/health", { cache: "no-store" }).then(function(r){ return r.ok ? r.json() : null; }).then(function(j){
-    if (!j || j.service !== "portail-parents-server") return;
+  if (!/^https?:$/.test(location.protocol)) { window.__ppServerOk = false; return Promise.resolve(); }
+  return fetch("api/health", { cache: "no-store" }).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }).then(function(j){
+    var ok = !!(j && j.service === "portail-parents-server");
+    window.__ppServerOk = ok;
     if (typeof state === "undefined" || !state || !state.api) return;
     var o = location.origin;
-    if (state.api.baseUrl !== o || !state.api.enabled) { state.api.baseUrl = o; state.api.enabled = true; try { save(false); } catch(e) {} }
-  }).catch(function(){});
+    if (ok) {
+      if (state.api.baseUrl !== o || !state.api.enabled) { state.api.baseUrl = o; state.api.enabled = true; try { save(false); } catch(e) {} }
+    } else if (state.api.baseUrl === o && !state.api._manualServer && !state.api.lastSyncAt && !state.api.serverRevision) {
+      state.api.enabled = false; state.api.lastSyncError = ""; try { save(false); } catch(e) {}
+    }
+  });
 })();
 </script>
-</body>
-</html>
 
 <script id="pp2399diagnostic">
 (function(){
@@ -7384,7 +7388,7 @@ window.__ppServerReady = (function(){
     var allowed=isAdmin()?(state.classes||[]):parentClassList(currentParent());
     var list=classwideBulletins().filter(function(b){return isAdmin()||allowed.indexOf(b.className)!==-1;}).slice().sort(function(a,b){return (b.id||0)-(a.id||0)});
     return '<div class="panel-head"><div><h2>Bulletins séquentiels</h2><p class="muted">L’administration importe le PDF officiel. Les parents ne voient et ne téléchargent que les bulletins des classes de leurs enfants.</p></div></div>'+
-      (isAdmin()?'<div class="panel"><h3>Importer et publier un bulletin PDF</h3><div class="field"><label>Classe</label><select id="bpClass">'+(state.classes||[]).map(function(c){return '<option value="'+safeText(c)+'">'+safeText(c)+'</option>'}).join('')+'</select></div><div class="field"><label>Séquence / période</label><select id="bpSeq"><option>Séquence 1</option><option>Séquence 2</option><option>Séquence 3</option><option>Séquence 4</option><option>Trimestre 1</option><option>Trimestre 2</option><option>Trimestre 3</option></select></div><div class="field"><label>Fichier PDF officiel</label><input id="bpFile" type="file" accept=".pdf,application/pdf"><small class="muted">PDF uniquement, maximum 1,8 Mo pour limiter les erreurs de stockage sur téléphone.</small></div><button class="btn primary" onclick="portalImportBulletin()">Importer et publier</button></div>':'')+
+      (isAdmin()?'<div class="panel"><h3>Importer et publier un bulletin PDF</h3><div class="field"><label>Classe</label><select id="bpClass">'+(state.classes||[]).map(function(c){return '<option value="'+safeText(c)+'">'+safeText(c)+'</option>'}).join('')+'</select></div><div class="field"><label>Séquence / période</label><select id="bpSeq"><option>Séquence 1</option><option>Séquence 2</option><option>Séquence 3</option><option>Séquence 4</option><option>Séquence 5</option><option>Séquence 6</option><option>Trimestre 1</option><option>Trimestre 2</option><option>Trimestre 3</option></select></div><div class="field"><label>Fichier PDF officiel</label><input id="bpFile" type="file" accept=".pdf,application/pdf"><small class="muted">PDF uniquement, maximum 1,8 Mo pour limiter les erreurs de stockage sur téléphone.</small></div><button class="btn primary" onclick="portalImportBulletin()">Importer et publier</button></div>':'')+
       '<div class="panel"><h3>Bulletins disponibles ('+list.length+')</h3>'+(list.length?list.map(function(b){return '<div class="item"><b>'+safeText(b.sequence||'Bulletin séquentiel')+' — '+safeText(b.className)+'</b><p class="muted">'+safeText(b.name||'Bulletin PDF')+' · publié le '+safeText(b.date||'')+'</p><button class="btn primary" onclick="portalDownloadBulletin('+Number(b.id)+')">Télécharger le PDF</button>'+(isAdmin()?'<button class="btn danger" onclick="portalDeleteClassBulletin('+Number(b.id)+')">Supprimer</button>':'')+'</div>'}).join(''):'<div class="empty">Aucun bulletin PDF importé pour '+(isAdmin()?'les classes':'la classe de votre enfant')+'.</div>')+'</div>';
   };
   window.portalImportBulletin=function(){
@@ -7514,7 +7518,7 @@ window.__ppServerReady = (function(){
    if(!admin&&!teacher&&!parent)return '<div class="panel"><h2>Accès réservé</h2><p>Le circuit des bulletins est réservé à l’administration, aux professeurs principaux et aux parents.</p></div>';
    var html='<div class="panel-head"><div><h2>Bulletins séquentiels</h2><p class="muted">Circuit obligatoire : demande du parent → administration → professeur principal → parent concerné.</p></div></div>';
    if(parent){
-     var classes=parentClasses(parent),seqs=['Séquence 1','Séquence 2','Séquence 3','Séquence 4'];
+     var classes=parentClasses(parent),seqs=['Séquence 1','Séquence 2','Séquence 3','Séquence 4','Séquence 5','Séquence 6','Trimestre 1','Trimestre 2','Trimestre 3'];
      html+='<div class="panel"><h3>Demander un bulletin</h3><p class="muted">L’administration ne peut transmettre le bulletin qu’après réception de votre demande.</p>';
      if(!classes.length)html+='<p class="empty">Aucune classe n’est associée à votre compte. Contactez l’administration pour corriger votre dossier.</p>';
      else html+='<div class="field"><label>Classe de l’enfant</label><select id="brClass">'+classes.map(function(c){return '<option value="'+safe(c)+'">'+safe(c)+'</option>'}).join('')+'</select></div><div class="field"><label>Séquence</label><select id="brSeq">'+seqs.map(function(x){return '<option>'+safe(x)+'</option>'}).join('')+'</select></div><button class="btn primary" onclick="portalRequestBulletin()">Envoyer la demande à l’administration</button>';
@@ -9735,6 +9739,7 @@ window.__ppServerReady = (function(){
       if (!state.api || typeof state.api !== 'object') state.api = {};
       var base = originBase();
       if (!base) return;
+      if (window.__ppServerOk !== true) return;     /* 2.3.129 : jamais d'activation sans avoir vérifié le serveur */
       // Si déjà configuré manuellement vers une autre URL, ne pas écraser
       var current = (state.api.baseUrl || '').replace(/\/$/, '');
       if (current && current !== base.replace(/\/$/, '') && current.indexOf(location.hostname) === -1) {
@@ -10574,3 +10579,593 @@ window.__ppServerReady = (function(){
 })();
 </script>
 
+<style id="pp-theme-2026">
+/* ========== Portail Parents — charte graphique 2.3.125 ========== */
+:root{
+  --brand-950:#071236; --brand-900:#0a1b4a; --brand-800:#10286b; --brand-700:#173a94; --brand-600:#1f4fc4; --brand-500:#3b6cf0; --brand-200:#c9d8ff; --brand-100:#e3ecff; --brand-50:#f1f5ff;
+  --gold-600:#b8870b; --gold-500:#d9a21b; --gold-100:#fdf3d4;
+  --ok:#0f9d6b; --ok-soft:#e1f6ed; --warn:#c96a04; --warn-soft:#fff1d9; --bad:#d92d4a; --bad-soft:#fde8ec; --info:#0a86a8; --info-soft:#def4fa;
+  --bg:#f2f5fb; --card:#ffffff; --text:#0e1a3b; --muted:#5a6a88; --border:#e1e8f4;
+  --primary:var(--brand-600); --primary-hover:var(--brand-700); --primary-soft:var(--brand-50); --accent:var(--gold-500);
+  --radius:18px; --radius-sm:12px;
+  --shadow:0 1px 2px rgba(10,27,74,.05),0 12px 32px -14px rgba(10,27,74,.22);
+  --shadow-lg:0 18px 44px -16px rgba(10,27,74,.35);
+  --side-w:264px; --top-h:64px;
+  --input-bg:#fff; --input-border:#d6dfef; --toast-bg:#0e1a3b;
+}
+html body.dark{
+  --bg:#080f24; --card:#101a38; --text:#e9efff; --muted:#9db0d4; --border:#223056;
+  --primary:#5b8cff; --primary-hover:#7ea3ff; --primary-soft:#14234f; --accent:#e5b13a;
+  --ok-soft:#0f2e25; --warn-soft:#33260b; --bad-soft:#3a1420; --info-soft:#0d2d38;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -14px rgba(0,0,0,.6);
+  --input-bg:#0c1530; --input-border:#2a3a66; --toast-bg:#1b2750;
+}
+html body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif !important;
+  background:var(--bg) !important; color:var(--text) !important; letter-spacing:-0.006em;
+  background-image:radial-gradient(900px 380px at 100% -80px,rgba(31,79,196,.10),transparent 60%) !important; background-repeat:no-repeat !important;
+}
+html body.dark{background-image:radial-gradient(900px 380px at 100% -80px,rgba(91,140,255,.10),transparent 60%) !important}
+
+/* ---------- Barre latérale (ordinateur) ---------- */
+html body .side{
+  width:var(--side-w) !important; min-width:var(--side-w) !important; border:0 !important; padding:20px 14px !important;
+  background:linear-gradient(185deg,var(--brand-950) 0%,var(--brand-800) 58%,var(--brand-600) 150%) !important; color:#e8eefc !important;
+  box-shadow:6px 0 30px -12px rgba(7,18,54,.5);
+}
+html body .side .brand{gap:12px;padding:4px 8px 18px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,.1)}
+html body .side .brand-logo{width:46px !important;height:46px !important;border-radius:50% !important;border:2px solid var(--gold-500) !important;background:#fff !important;padding:2px;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+html body .side .brand-text{color:#fff !important;font-weight:800;font-size:16px;letter-spacing:-.01em;line-height:1.15}
+html body .side .version-tag{color:rgba(232,238,252,.55) !important;font-size:10.5px;font-weight:600}
+html body .nav button{
+  color:rgba(232,238,252,.78) !important; background:transparent !important; border:0 !important; border-radius:12px !important;
+  font-weight:600 !important; font-size:13.5px !important; padding:11px 14px !important; margin:2px 0 !important; text-align:left; position:relative;
+  transition:background .15s,color .15s;
+}
+html body .nav button:hover{background:rgba(255,255,255,.09) !important;color:#fff !important}
+html body .nav button.active{background:rgba(255,255,255,.15) !important;color:#fff !important;box-shadow:inset 3px 0 0 var(--gold-500) !important}
+html body .nav .badge-count{background:var(--bad) !important;color:#fff !important;font-size:10px !important;font-weight:800;min-width:19px;height:19px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--brand-800)}
+html body .side .logout{background:rgba(255,255,255,.08) !important;color:#ffd7de !important;border:1px solid rgba(255,255,255,.14) !important;border-radius:12px !important;font-weight:700}
+html body .side .logout:hover{background:rgba(217,45,74,.25) !important}
+
+/* ---------- En-tête ---------- */
+html body .top{
+  position:sticky;top:0;z-index:40;min-height:var(--top-h);height:auto !important;padding:10px 22px !important;gap:10px;
+  background:color-mix(in srgb,var(--card) 88%,transparent) !important;-webkit-backdrop-filter:saturate(1.4) blur(12px);backdrop-filter:saturate(1.4) blur(12px);
+  border-bottom:1px solid var(--border) !important;box-shadow:0 1px 0 rgba(10,27,74,.03) !important;
+}
+html body .top > b{font-size:15px;font-weight:800;color:var(--text);letter-spacing:-.01em}
+html body .top .user{background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+html body .theme-toggle{width:40px;height:40px;border-radius:50% !important;border:1px solid var(--border) !important;background:var(--card) !important;font-size:16px}
+html body #ppSyncChip{min-height:36px !important;padding:6px 12px !important;font-size:12px !important;border-radius:999px !important;font-weight:700 !important;background:var(--ok-soft) !important;color:var(--ok) !important;border:1px solid transparent !important}
+html body .top-search input{border-radius:999px !important;background:var(--bg) !important;border:1px solid var(--border) !important;padding:10px 16px !important;min-height:40px}
+
+/* ---------- Contenu ---------- */
+html body .content{max-width:1180px !important;padding:24px 26px 48px !important}
+html body h1{font-size:1.6rem !important;font-weight:800 !important;letter-spacing:-.03em;color:var(--text);margin:2px 0 6px}
+html body h2{font-size:1.15rem !important;font-weight:750 !important;letter-spacing:-.02em;color:var(--text)}
+html body h3{font-size:1.02rem !important;font-weight:750 !important;color:var(--text)}
+html body .muted{color:var(--muted) !important}
+html body .panel,html body .card,html body .stat-card,html body .login-card{
+  background:var(--card) !important;border:1px solid var(--border) !important;border-radius:var(--radius) !important;box-shadow:var(--shadow) !important;
+}
+html body .panel{padding:20px 22px !important;margin-top:16px}
+html body .panel-head{margin-bottom:14px !important;align-items:center}
+html body .panel-head h2,html body .panel-head h3{position:relative;padding-left:12px}
+html body .panel-head h2:before,html body .panel-head h3:before{content:"";position:absolute;left:0;top:.2em;bottom:.2em;width:4px;border-radius:4px;background:linear-gradient(180deg,var(--brand-500),var(--gold-500))}
+html body .item{background:var(--card) !important;border:1px solid var(--border) !important;border-radius:var(--radius-sm) !important;box-shadow:none !important;padding:14px 16px !important;transition:border-color .15s,background .15s,transform .1s}
+html body .item:hover{background:var(--primary-soft) !important;border-color:var(--brand-200) !important}
+html body .list{gap:10px !important}
+html body .empty{color:var(--muted) !important;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius-sm);padding:26px 16px !important;text-align:center}
+
+/* Cartes chiffrées */
+html body .cards,html body .stat-grid{gap:14px !important}
+html body .card,html body .stat-card{position:relative;overflow:hidden;padding:16px 18px !important}
+html body .card:before,html body .stat-card:before{content:"";position:absolute;left:0;top:0;right:0;height:4px;background:var(--brand-500)}
+html body .cards > *:nth-child(4n+2):before,html body .stat-grid > *:nth-child(4n+2):before{background:var(--gold-500)}
+html body .cards > *:nth-child(4n+3):before,html body .stat-grid > *:nth-child(4n+3):before{background:var(--ok)}
+html body .cards > *:nth-child(4n+4):before,html body .stat-grid > *:nth-child(4n+4):before{background:var(--info)}
+html body .card .num,html body .stat-card .value{font-size:30px !important;font-weight:850 !important;letter-spacing:-.035em;color:var(--text) !important;line-height:1.1}
+html body .stat-card .label{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+
+/* Boutons */
+html body .btn{min-height:44px !important;padding:10px 18px !important;border-radius:12px !important;font-weight:700 !important;font-size:13.5px !important;letter-spacing:-.005em;border:1px solid transparent;transition:transform .08s,box-shadow .15s,background .15s,border-color .15s;cursor:pointer}
+html body .btn:active{transform:scale(.975)}
+html body .btn.primary,html body .btn-primary{background:linear-gradient(135deg,var(--brand-600),var(--brand-500)) !important;color:#fff !important;border-color:transparent !important;box-shadow:0 6px 16px -6px rgba(31,79,196,.6)}
+html body .btn.primary:hover{background:linear-gradient(135deg,var(--brand-700),var(--brand-600)) !important;box-shadow:0 8px 20px -6px rgba(31,79,196,.7)}
+html body .btn.secondary,html body .btn-secondary{background:var(--card) !important;color:var(--primary) !important;border:1px solid var(--brand-200) !important}
+html body .btn.secondary:hover{background:var(--primary-soft) !important}
+html body .btn.danger{background:var(--bad-soft) !important;color:var(--bad) !important;border:1px solid transparent !important}
+html body .btn.danger:hover{background:#fbd5dc !important}
+html body .panel .btn,html body .panel-head .btn{margin:2px 4px 2px 0}
+
+html body button.btn:not(.primary):not(.danger):not(.secondary):not(.logout):not(.btn-primary){background:var(--card) !important;color:var(--primary) !important;border:1px solid var(--brand-200) !important}
+
+/* Liens-boutons et bouton d'appel */
+html body a.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;text-align:center}
+html body .btn.call{background:linear-gradient(135deg,#0f9d6b,#17b985) !important;color:#fff !important;border-color:transparent !important;box-shadow:0 6px 16px -6px rgba(15,157,107,.6)}
+html body .btn.call:hover{background:linear-gradient(135deg,#0c8a5d,#0f9d6b) !important}
+html body .nav button[data-page="contacts"]:before{content:"📞"}
+
+/* Badges */
+html body .badge{background:var(--brand-100) !important;color:var(--brand-700) !important;font-size:10.5px !important;font-weight:800 !important;padding:4px 10px !important;border-radius:999px !important;letter-spacing:.03em}
+html body .badge-new{background:var(--gold-100) !important;color:var(--gold-600) !important}
+html body .nonlu{background:var(--gold-100) !important;color:var(--gold-600) !important}
+html body .lu{background:var(--ok-soft) !important;color:var(--ok) !important}
+html body .urgent{color:var(--bad) !important}
+
+/* Formulaires */
+html body .field label{font-size:12px !important;font-weight:700 !important;color:var(--muted) !important;margin-bottom:6px}
+html body input[type=text],html body input[type=password],html body input[type=email],html body input[type=tel],html body input[type=number],html body input[type=date],html body input[type=time],html body select,html body textarea{
+  background:var(--input-bg) !important;border:1px solid var(--input-border) !important;border-radius:12px !important;min-height:46px;padding:11px 14px !important;color:var(--text) !important;font-size:14.5px;
+}
+html body input:focus,html body select:focus,html body textarea:focus{border-color:var(--brand-500) !important;box-shadow:0 0 0 4px rgba(59,108,240,.16) !important;outline:none}
+
+/* Messagerie */
+html body .message{border-radius:16px !important;padding:12px 14px !important}
+html body .received{background:var(--card) !important;border:1px solid var(--border) !important}
+html body .sent{background:var(--primary-soft) !important;border:1px solid var(--brand-200) !important}
+
+/* Calendrier */
+html body .cal-day{border-radius:12px !important;background:var(--card)}
+html body .cal-day.today{box-shadow:inset 0 0 0 2px var(--brand-500) !important}
+
+/* Notification */
+html body .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:9999;background:var(--toast-bg) !important;color:#fff !important;border-radius:14px !important;padding:12px 18px !important;font-weight:650;font-size:13.5px;box-shadow:var(--shadow-lg) !important;max-width:min(92vw,520px);text-align:center}
+
+/* ---------- Connexion ---------- */
+html body .login{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:22px;
+  background:radial-gradient(700px 420px at 85% -5%,rgba(217,162,27,.28),transparent 60%),radial-gradient(900px 600px at 0% 100%,rgba(59,108,240,.5),transparent 60%),linear-gradient(160deg,var(--brand-950) 0%,var(--brand-800) 55%,var(--brand-600) 120%) !important;
+}
+html body .login-card{width:min(430px,100%);border-radius:26px !important;padding:34px 28px 26px !important;box-shadow:0 30px 70px -20px rgba(0,0,0,.55) !important;border:0 !important}
+html body .login-card .logo-img{display:block;margin:0 auto 12px;width:92px !important;height:92px !important;border:3px solid var(--gold-500) !important;box-shadow:0 10px 26px rgba(10,27,74,.3) !important;border-radius:50% !important}
+html body .login-card h1,html body .login-card h2{text-align:center;color:var(--brand-800);font-size:1.45rem !important;font-weight:850 !important}
+html body .login-card .demo{background:var(--brand-50) !important;border:1px solid var(--brand-100) !important;color:var(--text);border-radius:14px !important;padding:12px 14px;font-size:12.5px;line-height:1.55;margin-top:14px}
+html body .login-card:after{content:"Collège Saint-Thomas de Manjo · Diocèse de Bafoussam";display:block;text-align:center;font-size:11px;font-weight:600;color:var(--muted);margin-top:16px}
+
+/* ---------- Téléphone : barre de navigation en bas ---------- */
+@media (max-width:900px){
+  html body .layout{display:block !important}
+  html body .side{
+    position:fixed !important;left:0;right:0;bottom:0;top:auto !important;width:100% !important;min-width:0 !important;height:auto !important;
+    flex-direction:row !important;align-items:stretch;padding:6px 6px calc(6px + env(safe-area-inset-bottom)) !important;z-index:60;
+    background:rgba(8,20,58,.97) !important;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-radius:22px 22px 0 0;box-shadow:0 -10px 34px rgba(7,18,54,.35) !important;overflow:hidden;
+  }
+  html body .side .brand{display:none !important}
+  html body .side .nav{display:flex !important;flex-direction:row !important;flex:1;overflow-x:auto;overflow-y:hidden;gap:2px;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+  html body .side .nav::-webkit-scrollbar{display:none}
+  html body .nav button{
+    width:auto !important;flex:0 0 80px !important;display:flex !important;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:68px;
+    font-size:10px !important;font-weight:650 !important;line-height:1.08;padding:6px 3px !important;margin:0 !important;border-radius:14px !important;text-align:center;scroll-snap-align:start;white-space:normal;overflow-wrap:anywhere;
+  }
+  html body .nav button:before{font-size:20px !important;line-height:1;margin:0 !important}
+  html body .nav button.active{background:rgba(255,255,255,.14) !important;box-shadow:inset 0 2px 0 var(--gold-500) !important}
+  html body .nav .badge-count{position:absolute;top:1px;right:14px;box-shadow:0 0 0 2px rgba(8,20,58,1)}
+  html body .side .logout{flex:0 0 auto;min-width:70px;font-size:10.5px !important;padding:6px !important;margin-left:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;line-height:1.1;min-height:0 !important}
+  html body .main{padding-bottom:calc(86px + env(safe-area-inset-bottom)) !important}
+  html body .top{position:static !important;padding:10px 14px 8px !important;flex-wrap:wrap;gap:8px}
+  html body .top-search input{min-height:40px !important;padding:8px 14px !important}
+  html body .top-search .btn{min-height:40px !important;padding:6px 14px !important}
+  html body .top > b{flex:1;min-width:0;font-size:14.5px}
+  html body .top .user{display:none}
+  html body .top-search{order:9;flex:1 1 100%;width:100%}
+  html body .content{padding:16px 14px 28px !important}
+  html body .panel{padding:16px !important;border-radius:16px !important}
+  html body h1{font-size:1.4rem !important}
+  html body .cards{grid-template-columns:1fr 1fr !important}
+  html body .toast{bottom:calc(92px + env(safe-area-inset-bottom))}
+}
+@media (max-width:560px){ html body .cards{grid-template-columns:1fr 1fr !important} html body .grid2{grid-template-columns:1fr !important} }
+@media print{ html body .side,html body .top,html body .toast{display:none !important} html body .content{max-width:none !important} }
+
+</style>
+<script id="pp-fixes-125">
+(function(){
+  'use strict';
+  window.GESCO_VERSION = '2.3.129';
+  function nz(x){ return String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  function pk(s){ var d = String(s == null ? '' : s).replace(/\D/g, ''); return d.length >= 8 ? d.slice(-9) : ''; }
+  function byId(i){ return document.getElementById(i); }
+  function genPw(){
+    var set = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', out = '', a = new Uint32Array(10);
+    (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach(function(_, i){ a[i] = Math.floor(Math.random() * 4294967296); });
+    for (var i = 0; i < 10; i++) out += set[a[i] % set.length];
+    return out;
+  }
+  function serverMode(){ return !!(state && state.api && state.api.enabled && state.api.baseUrl); }
+  function wrap(name, fn){ var orig = window[name]; if (typeof orig === 'function') window[name] = function(){ return fn.call(this, orig, arguments); }; }
+
+  /* Réponse HTML (page web) au lieu de la réponse du serveur : message clair, et retour au mode local si l'adresse n'a jamais été validée */
+  wrap('apiRequest', function(orig, args){
+    return orig.apply(this, args).catch(function(e){
+      var m = String((e && e.message) || '');
+      if (/^\s*<(!doctype|html)/i.test(m)) {
+        var ok = window.__ppServerOk === true || (state && state.api && (state.api.lastSyncAt || state.api.serverRevision));
+        if (!ok && state && state.api) { state.api.enabled = false; state.api.lastSyncStatus = 'local'; try { save(false); } catch (x) {} }
+        var msg = ok ? 'Le serveur démarre ou est indisponible : réessayez dans une minute.' : 'Cette adresse n’est pas celle du serveur du Portail : l’application reste en mode local.';
+        if (state && state.api) state.api.lastSyncError = msg;
+        throw new Error(msg);
+      }
+      throw e;
+    });
+  });
+
+  /* Bouton « Tout marquer lu » : renderMessages n'existait pas */
+  if (typeof window.renderMessages !== 'function') window.renderMessages = function(){ try { render(); } catch (e) {} };
+
+  /* Changement de mot de passe quand le serveur central est connecté */
+  wrap('changePassword', function(orig, args){
+    if (state && state.api && state.api.sessionToken && byId('oldPass') && byId('newPass')) {
+      var o = byId('oldPass').value, n = byId('newPass').value, c = byId('newPass2') ? byId('newPass2').value : n;
+      if (!o || !n) return toast('Renseignez l’ancien et le nouveau mot de passe');
+      if (n !== c) return toast('Les deux nouveaux mots de passe ne correspondent pas');
+      if (state.user === 'admin') { if (n.length < 6 || n === '1234') return toast('Mot de passe trop faible (6 caractères minimum)'); }
+      else if (!/^\d{4}$/.test(n) || /^(\d)\1{3}$/.test(n) || n === '1234') return toast('Le code doit comporter 4 chiffres (évitez 1234, 0000, 1111…)');
+      serverRequest('/api/auth/password', { method: 'POST', body: JSON.stringify({ currentPassword: o, newPassword: n }) })
+        .then(function(){ ['oldPass', 'newPass', 'newPass2'].forEach(function(i){ if (byId(i)) byId(i).value = ''; }); toast('Mot de passe modifié'); })
+        .catch(function(e){ toast((e && e.message) || 'Échec du changement de mot de passe'); });
+      return;
+    }
+    return orig.apply(this, args);
+  });
+
+  /* Doublons : un numéro de téléphone = un seul parent ; un enseignant = un nom / e-mail */
+  wrap('saveParent', function(orig, args){
+    var p = byId('pp'), k = p ? pk(p.value) : '';
+    if (k && (state.parents || []).some(function(x){ return pk(x.phone) === k; })) return toast('Ce numéro est déjà utilisé par un autre parent');
+    return orig.apply(this, args);
+  });
+  wrap('updateParent', function(orig, args){
+    var id = args[0], p = byId('pp'), k = p ? pk(p.value) : '';
+    if (k && (state.parents || []).some(function(x){ return x.id !== id && pk(x.phone) === k; })) return toast('Ce numéro est déjà utilisé par un autre parent');
+    return orig.apply(this, args);
+  });
+  wrap('saveTeacher', function(orig, args){
+    var n = byId('tName'), e = byId('tEmail'), pw = byId('tPass');
+    if (n) {
+      var nn = nz(n.value), ee = nz(e && e.value);
+      if ((state.teachers || []).some(function(t){ return t && ((nn && nz(t.name) === nn) || (ee && nz(t.email) === ee)); })) return toast('Un enseignant avec ce nom ou cet e-mail existe déjà');
+    }
+    if (pw && serverMode()) { pw.value = genPw() + genPw(); }       /* l'enseignant choisira son code à sa première connexion */
+    else if (pw && (!pw.value || pw.value === '1234')) {            /* plus de mot de passe « 1234 » par défaut */
+      var g = genPw(); pw.value = g;
+      try { alert('Mot de passe généré pour ' + (n ? n.value : 'l’enseignant') + ' :\n\n' + g + '\n\nNotez-le et remettez-le à l’enseignant ; il pourra le changer dans son profil.'); } catch (x) {}
+    }
+    return orig.apply(this, args);
+  });
+
+  /* Suppression d'une classe encore utilisée */
+  wrap('deleteClass', function(orig, args){
+    var c = state.classes && state.classes[args[0]];
+    if (c) {
+      var n = nz(c), has = function(arr){ return (arr || []).some(function(x){ return nz(x) === n; }); };
+      var np = (state.parents || []).filter(function(p){ return nz(p.className) === n || (p.children || []).some(function(ch){ return ch && nz(ch.className) === n; }); }).length;
+      var nt = (state.teachers || []).filter(function(t){ return has(t.classes) || has(t.principalClasses) || nz(t.principalClass) === n; }).length;
+      var ns = (state.students || []).filter(function(s){ return nz(s.className) === n; }).length;
+      var nb = (state.bulletins || []).filter(function(b){ return nz(b.className) === n; }).length;
+      var parts = []; if (np) parts.push(np + ' parent(s)'); if (nt) parts.push(nt + ' enseignant(s)'); if (ns) parts.push(ns + ' élève(s)'); if (nb) parts.push(nb + ' bulletin(s)');
+      if (parts.length) return toast('Suppression impossible : « ' + c + ' » est utilisée (' + parts.join(', ') + '). Déplacez-les d’abord.');
+    }
+    return orig.apply(this, args);
+  });
+
+  /* « Mot de passe oublié » : la démonstration locale ne protège rien quand le serveur est connecté */
+  wrap('showForgotPassword', function(orig, args){
+    if (state && state.api && state.api.enabled && state.api.baseUrl) {
+      var card = document.querySelector('.login-card');
+      if (card) {
+        var logo = card.querySelector('.logo-img'), lh = logo ? logo.outerHTML : '';
+        card.innerHTML = lh + '<h2>Mot de passe oublié</h2><p class="muted" style="text-align:center;margin:10px 0 16px">Pour votre sécurité, la réinitialisation est effectuée par l’administration de l’établissement. Contactez-la en précisant votre nom et votre numéro de téléphone.</p><button class="btn secondary full" onclick="render()">← Retour à la connexion</button>';
+        return;
+      }
+    }
+    return orig.apply(this, args);
+  });
+
+  /* Habillage et cohérence d'affichage après chaque rendu */
+  function post(){
+    try {
+      var d = document.querySelector('.login-card .demo');
+      if (d && !d.dataset.ppClean) {
+        d.dataset.ppClean = '1'; d.removeAttribute('style');
+        d.innerHTML = '<b>Première connexion ?</b><br>Parents : votre numéro de téléphone.<br>Enseignants : votre nom et le mot de passe remis par l’administration.<br><span class="muted">Besoin d’aide ? Contactez l’établissement.</span>';
+      }
+      var v = document.querySelector('.brand .version-tag'); if (v) v.textContent = 'v' + window.GESCO_VERSION;
+      var lc = document.querySelector('.login-card');
+      if (lc && !lc.querySelector('.pp-ver')) { var vv = document.createElement('div'); vv.className = 'pp-ver muted'; vv.style.cssText = 'text-align:center;font-size:11px;margin-top:4px'; vv.textContent = 'Version ' + window.GESCO_VERSION; lc.appendChild(vv); }
+      var ttl = 'Portail Parents — V' + window.GESCO_VERSION; if (document.title !== ttl) document.title = ttl;
+      var isSup = String(state && state.user || '').indexOf('supervisor') === 0;
+      if (isSup) {            /* le surveillant n'a pas de « suivi d'élèves » parent : on masque l'entrée et corrige le libellé */
+        document.querySelectorAll('[data-page="suivi"]').forEach(function(e){ e.remove(); });
+        if (typeof page !== 'undefined' && page === 'suivi' && typeof go === 'function') { go('viescolaire'); return; }
+      }
+      var c = document.querySelector('.content'); if (!c) return;
+      var re = /\b(\d{4})-(\d{2})-(\d{2})\b(?!T)/, reg = /\b(\d{4})-(\d{2})-(\d{2})\b(?!T)/g;
+      var tw = document.createTreeWalker(c, NodeFilter.SHOW_TEXT, null), tn, todo = [];
+      while ((tn = tw.nextNode())) { if (re.test(tn.nodeValue) && !/^(SCRIPT|STYLE|TEXTAREA|PRE|CODE|OPTION)$/.test(tn.parentNode.nodeName)) todo.push(tn); }
+      todo.forEach(function(t){ t.nodeValue = t.nodeValue.replace(reg, '$3/$2/$1'); });
+      if (isSup) { var w2 = document.createTreeWalker(c, NodeFilter.SHOW_TEXT, null), n2; while ((n2 = w2.nextNode())) { if (n2.nodeValue.indexOf('Compte Parent') !== -1) n2.nodeValue = n2.nodeValue.replace('Compte Parent', 'Compte Surveillant général'); } }
+    } catch (e) {}
+  }
+  var base = window.render;
+  if (typeof base === 'function') window.render = function(){
+    var nv = document.querySelector('.nav'), sl = nv ? nv.scrollLeft : null;
+    var x = base.apply(this, arguments);
+    var n2 = document.querySelector('.nav');
+    if (n2) {
+      if (sl !== null) n2.scrollLeft = sl;
+      var a = n2.querySelector('button.active');
+      if (a) {
+        var nr = n2.getBoundingClientRect(), ar = a.getBoundingClientRect();
+        if (ar.left < nr.left + 6 || ar.right > nr.right - 6) n2.scrollLeft = Math.max(0, n2.scrollLeft + (ar.left - nr.left) - (nr.width - ar.width) / 2);
+      }
+    }
+    post(); return x;
+  };
+  setInterval(post, 1500); post();
+  document.title = 'Portail Parents — V' + window.GESCO_VERSION;
+
+  /* ===== 6 séquences par année (3 trimestres de 2 séquences) ===== */
+  var SEQ6 = ['Séquence 1', 'Séquence 2', 'Séquence 3', 'Séquence 4', 'Séquence 5', 'Séquence 6'];
+  function fixSequences(){
+    try {
+      var s = state.sequences;
+      if (!Array.isArray(s) || SEQ6.some(function(q){ return s.indexOf(q) === -1; }) || s.indexOf('Trimestre 1') !== -1) {
+        state.sequences = SEQ6.slice();
+        if (typeof markLocalChange === 'function') markLocalChange();
+        save(false);
+      }
+    } catch (e) {}
+  }
+  fixSequences();
+
+  /* ===== Première connexion : nom + choix d'un code à 4 chiffres ===== */
+  function finishServerLogin(data){
+    state.api.sessionToken = data.token;
+    state.api.sessionExpiresAt = Date.now() + ((data.expiresIn || 43200) * 1000);
+    state.api.serverUser = data.user;
+    save();
+    return data.user;
+  }
+  window.serverLogin = async function(username, password){
+    if (!serverMode()) return null;
+    var ph = (byId('loginPhone') || {}).value || '';
+    var data = await apiRequest('/api/auth/login', { method: 'POST', body: JSON.stringify({ schoolId: state.api.schoolId || 'cst-manjo', username: username, password: password, phone: ph }) });
+    if (!data || !data.token || !data.user) throw new Error("Réponse d'authentification invalide");
+    return finishServerLogin(data);
+  };
+  function showPhoneField(){
+    if (byId('loginPhone')) return;
+    var f = byId('loginName') && byId('loginName').closest('.field'); if (!f) return;
+    var d = document.createElement('div'); d.className = 'field';
+    d.innerHTML = '<label>Numéro de téléphone</label><input id="loginPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="Plusieurs personnes portent ce nom : indiquez votre numéro">';
+    f.parentNode.insertBefore(d, f.nextSibling);
+    byId('loginPhone').focus();
+  }
+  function showFirstLogin(n, ph, st){
+    var card = document.querySelector('.login-card'); if (!card) return;
+    var logo = card.querySelector('.logo-img'), lh = logo ? logo.outerHTML : '';
+    if (st.noPhoneOnRecord) {
+      card.innerHTML = lh + '<h2>Première connexion</h2><p class="muted" style="text-align:center;margin:8px 0 16px">Bonjour ' + esc(st.displayName) + '. Aucun numéro de téléphone n’est enregistré pour votre compte : demandez à l’administration de l’ajouter, puis réessayez.</p><button class="btn secondary full" onclick="render()">← Retour</button>';
+      return;
+    }
+    card.innerHTML = lh + '<h2>Première connexion</h2>'
+      + '<p class="muted" style="text-align:center;margin:6px 0 14px">Bonjour <b>' + esc(st.displayName) + '</b>. Choisissez un code secret de <b>4 chiffres</b> : il vous servira à vous connecter.</p>'
+      + (st.requiresPhone ? '<div class="field"><label>Numéro de téléphone enregistré à l’école</label><input id="flPhone" type="tel" inputmode="tel" autocomplete="tel" value="' + esc(ph) + '" placeholder="Ex. 6 70 00 00 00"></div>' : '')
+      + '<div class="field"><label>Votre code (4 chiffres)</label><input id="flPin" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" placeholder="••••"></div>'
+      + '<div class="field"><label>Confirmez le code</label><input id="flPin2" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" placeholder="••••"></div>'
+      + '<button class="btn primary full" id="flOk">Créer mon code et me connecter</button>'
+      + '<button class="btn secondary full" style="margin-top:8px" onclick="render()">← Retour</button>';
+    window.__ppFl = { name: n };
+    ['flPin', 'flPin2'].forEach(function(i){ var e = byId(i); if (e) e.addEventListener('input', function(){ e.value = e.value.replace(/\D/g, '').slice(0, 4); }); });
+    byId('flOk').onclick = function(){ window.ppFirstLoginSubmit(); };
+    var first = byId('flPhone') && !byId('flPhone').value ? byId('flPhone') : byId('flPin'); if (first) first.focus();
+  }
+  window.ppFirstLoginSubmit = async function(){
+    var n = (window.__ppFl || {}).name, ph = byId('flPhone') ? byId('flPhone').value : '', p1 = byId('flPin').value, p2 = byId('flPin2').value;
+    if (!/^\d{4}$/.test(p1)) return toast('Le code doit comporter exactement 4 chiffres');
+    if (p1 !== p2) return toast('Les deux codes ne correspondent pas');
+    var btn = byId('flOk'); if (btn) { btn.disabled = true; btn.textContent = 'Création…'; }
+    try {
+      var data = await apiRequest('/api/auth/setup', { method: 'POST', body: JSON.stringify({ username: n, phone: ph, pin: p1 }) });
+      var u = finishServerLogin(data);
+      applyServerUser(u);
+      try { await syncWithServer(true); } catch (e) {}
+      login(state.user);
+      toast('Bienvenue ! Votre code est enregistré.');
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Créer mon code et me connecter'; }
+      toast((e && e.message) || 'Création du code impossible');
+    }
+  };
+  wrap('doLogin', function(orig, args){
+    if (!serverMode()) return orig.apply(this, args);
+    var n = ((byId('loginName') || {}).value || '').trim(), p = (byId('loginPass') || {}).value || '', ph = ((byId('loginPhone') || {}).value || '').trim();
+    if (!n) return toast('Saisissez votre nom');
+    if (nz(n) === 'admin') { if (!p) return toast('Saisissez le mot de passe'); return orig.apply(this, args); }
+    var btn = document.querySelector('.login-card .btn.primary');
+    if (btn) { btn.disabled = true; btn.textContent = 'Vérification…'; }
+    function reset(){ if (btn) { btn.disabled = false; btn.textContent = 'Se connecter'; } }
+    (window.__ppServerReady || Promise.resolve())
+      .then(function(){ return apiRequest('/api/auth/status', { method: 'POST', body: JSON.stringify({ username: n, phone: ph }) }); })
+      .then(function(st){
+        if (st.status === 'pending') { reset(); return showFirstLogin(n, ph, st); }
+        if (st.status === 'ambiguous' && !ph) { reset(); showPhoneField(); return toast('Plusieurs personnes portent ce nom : indiquez votre numéro de téléphone'); }
+        if (!p) { reset(); return toast('Saisissez votre code à 4 chiffres'); }
+        return orig.apply(window, []);
+      })
+      .catch(function(){ reset(); if (p) orig.apply(window, []); else toast('Connexion au serveur impossible'); });
+  });
+
+  /* ===== Réinitialisation d'accès par l'administration ===== */
+  window.ppResetAccess = function(kind, id){
+    if (!confirm('Réinitialiser l’accès de cette personne ?\n\nElle devra choisir un nouveau code à 4 chiffres à sa prochaine connexion.')) return;
+    serverRequest('/api/admin/users/reset', { method: 'POST', body: JSON.stringify({ kind: kind, id: id }) })
+      .then(function(){ toast('Accès réinitialisé : un nouveau code sera demandé à la prochaine connexion'); })
+      .catch(function(e){ toast((e && e.message) || 'Réinitialisation impossible'); });
+  };
+  function serverModeUi(){
+    if (!serverMode()) return;
+    var c = document.querySelector('.content');
+    /* écran de connexion */
+    var ln = byId('loginName'), lp = byId('loginPass');
+    if (ln && lp && !ln.dataset.ppSrv) {
+      ln.dataset.ppSrv = '1'; ln.placeholder = 'Votre nom (ex. Jean Dupont)';
+      lp.placeholder = 'Code à 4 chiffres (administrateur : mot de passe)'; lp.setAttribute('inputmode', 'numeric'); lp.removeAttribute('maxlength');
+      var labs = document.querySelectorAll('.login-card .field label');
+      if (labs[0]) labs[0].textContent = 'Votre nom'; if (labs[1]) labs[1].textContent = 'Code secret';
+      ln.addEventListener('input', function(){ lp.setAttribute('inputmode', nz(ln.value) === 'admin' ? 'text' : 'numeric'); });
+      var d = document.querySelector('.login-card .demo');
+      if (d) d.innerHTML = '<b>Première connexion ?</b><br>Saisissez votre <b>nom</b> : l’application vous demandera de choisir un code à 4 chiffres.<br><span class="muted">Code oublié ? Contactez l’administration.</span>';
+    }
+    if (!c) return;
+    /* textes qui évoquaient « mot de passe = téléphone » */
+    c.querySelectorAll('p,small').forEach(function(e){
+      var x = e.textContent || '';
+      if (x.indexOf('sera automatiquement le numéro de téléphone') !== -1 || x.indexOf('Mot de passe = n° de téléphone') !== -1 || x.indexOf('le mot de passe de connexion est toujours') !== -1)
+        e.textContent = 'Le parent se connecte avec son nom. À sa première connexion, il choisit un code à 4 chiffres ; son numéro de téléphone sert à vérifier son identité.';
+      else if (x.indexOf('Modifiez le téléphone ci-dessus puis enregistrez le profil') !== -1) e.textContent = 'Le numéro de téléphone sert uniquement à vérifier votre identité à la première connexion.';
+    });
+    /* formulaire enseignant : plus de mot de passe saisi par l'administration */
+    var tp = byId('tPass');
+    if (tp) { var f = tp.closest('.field'); if (f && !f.dataset.ppHid) { f.dataset.ppHid = '1'; f.style.display = 'none'; var np = document.createElement('p'); np.className = 'muted'; np.style.gridColumn = '1/-1'; np.textContent = 'L’enseignant choisira lui-même son code à 4 chiffres à sa première connexion (son numéro de téléphone sert à vérifier son identité).'; f.parentNode.insertBefore(np, f); } }
+    /* boutons « Réinitialiser l'accès » (administrateur) */
+    if (state.user === 'admin') {
+      [['editParent', 'parent'], ['editTeacher', 'teacher']].forEach(function(pair){
+        c.querySelectorAll('button[onclick^="' + pair[0] + '("]').forEach(function(b){
+          if (b.parentNode.querySelector('.pp-reset')) return;
+          var m = /\(([^)]*)\)/.exec(b.getAttribute('onclick')); if (!m) return;
+          var nb = document.createElement('button'); nb.className = 'btn secondary pp-reset'; nb.textContent = 'Réinitialiser l’accès';
+          nb.setAttribute('onclick', "ppResetAccess('" + pair[1] + "'," + m[1] + ")"); b.parentNode.insertBefore(nb, b.nextSibling);
+        });
+      });
+      if (typeof page !== 'undefined' && page === 'supervisorAdmin' && !c.querySelector('.pp-reset-sup') && state.supervisor && state.supervisor.id != null) {
+        var pn = document.createElement('div'); pn.className = 'panel pp-reset-sup';
+        pn.innerHTML = '<div class="panel-head"><h3>Accès du surveillant</h3></div><p class="muted">Si le surveillant a oublié son code, réinitialisez son accès : il en choisira un nouveau à sa prochaine connexion.</p><button class="btn secondary" onclick="ppResetAccess(\'supervisor\',' + Number(state.supervisor.id) + ')">Réinitialiser l’accès</button>';
+        c.insertBefore(pn, c.firstChild);
+      }
+    }
+  }
+  setInterval(serverModeUi, 800);
+
+  /* ===== Appels téléphoniques aux parents ===== */
+  function telHref(raw){
+    var d = String(raw == null ? '' : raw).replace(/[^\d+]/g, '');
+    if (!d) return '';
+    if (d.indexOf('00') === 0) d = '+' + d.slice(2);
+    if (d[0] === '+') return 'tel:' + d;
+    if (/^237\d{8,9}$/.test(d)) return 'tel:+' + d;
+    if (/^[26]\d{8}$/.test(d)) return 'tel:+237' + d;
+    return 'tel:' + d;
+  }
+  function kidsOf(p){ return ((p.children && p.children.length) ? p.children : [{ name: p.student, className: p.className }]).filter(function(c){ return c && c.name; }); }
+  function parentById(id){ return (state.parents || []).filter(function(p){ return String(p.id) === String(id); })[0]; }
+  function callAnchor(phone, label, extraCls){
+    var h = telHref(phone);
+    if (!h) return '<span class="btn secondary" style="opacity:.55;cursor:not-allowed">📞 Numéro manquant</span>';
+    return '<a class="btn call' + (extraCls ? ' ' + extraCls : '') + '" href="' + esc(h) + '">' + (label || '📞 Appeler') + '</a>';
+  }
+  window.ppLogCall = function(id){
+    try { var p = parentById(id); if (p && typeof logActivity === 'function') logActivity('Appel téléphonique', 'Appel au parent ' + p.name + (p.phone ? ' (' + p.phone + ')' : '')); } catch (e) {}
+    if (!/Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent || '')) {          /* ordinateur : pas de composeur, on copie le numéro */
+      var pp = parentById(id); if (pp && pp.phone && navigator.clipboard) { navigator.clipboard.writeText(pp.phone).then(function(){ toast('Numéro copié : ' + pp.phone); }).catch(function(){}); }
+    }
+  };
+  function isTeacherOnly(){ return typeof isTeacher === 'function' && isTeacher() && !(typeof isSupervisor === 'function' && isSupervisor()) && !(typeof isAdmin === 'function' && isAdmin()); }
+  function contactRole(){ return (typeof isAdmin === 'function' && isAdmin()) || (typeof isSupervisor === 'function' && isSupervisor()) || (typeof isTeacher === 'function' && isTeacher()); }
+  function myClassKeys(){
+    var t = (typeof currentTeacher === 'function') ? currentTeacher() : null, out = [];
+    if (t) { (t.classes || []).concat(t.principalClasses || [], t.principalClass ? [t.principalClass] : []).forEach(function(c){ out.push(nz(c)); }); }
+    return out;
+  }
+  function contactList(){
+    var keys = isTeacherOnly() ? myClassKeys() : null;
+    var q = nz(window.ppContactsQuery || ''), cf = window.ppContactsClass || '';
+    return (state.parents || []).filter(function(p){ return p && p.active !== false && p.name; }).map(function(p){
+      var kids = kidsOf(p).filter(function(c){ return !keys || keys.indexOf(nz(c.className)) !== -1; });
+      return { p: p, kids: kids };
+    }).filter(function(x){
+      if (!x.kids.length) return false;
+      if (cf && !x.kids.some(function(c){ return nz(c.className) === nz(cf); })) return false;
+      if (!q) return true;
+      var hay = nz(x.p.name) + ' ' + String(x.p.phone || '').replace(/\D/g, '') + ' ' + x.kids.map(function(c){ return nz(c.name) + ' ' + nz(c.className); }).join(' ');
+      return hay.indexOf(q) !== -1 || (q.replace(/\D/g, '').length >= 3 && hay.indexOf(q.replace(/\D/g, '')) !== -1);
+    }).sort(function(a, b){ return nz(a.p.name) < nz(b.p.name) ? -1 : 1; });
+  }
+  function contactItems(){
+    var L = contactList();
+    if (!L.length) return '<div class="empty">Aucun parent trouvé.</div>';
+    return '<p class="muted" style="margin:0 0 8px">' + L.length + ' parent' + (L.length > 1 ? 's' : '') + '</p>' + L.map(function(x){
+      var kids = x.kids.map(function(c){ return '<span class="badge">' + esc(c.name) + ' · ' + esc(c.className || '') + '</span>'; }).join(' ');
+      return '<div class="item"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div style="min-width:0"><b>' + esc(x.p.name) + '</b><div class="muted">' + esc(x.p.phone || 'Téléphone non renseigné') + '</div><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + kids + '</div></div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap">' + callAnchor(x.p.phone, '📞 Appeler').replace('<a ', '<a onclick="ppLogCall(' + Number(x.p.id) + ')" ') + '<button class="btn secondary" onclick="messageParent(' + Number(x.p.id) + ')">✉ Écrire</button></div></div></div>';
+    }).join('');
+  }
+  window.ppContactsRefresh = function(){ var e = byId('ctList'); if (e) e.innerHTML = contactItems(); };
+  function contactsView(){
+    var keys = isTeacherOnly() ? myClassKeys() : null, seen = {}, classes = [];
+    (state.parents || []).forEach(function(p){ kidsOf(p).forEach(function(c){ if (c.className && !seen[nz(c.className)] && (!keys || keys.indexOf(nz(c.className)) !== -1)) { seen[nz(c.className)] = 1; classes.push(c.className); } }); });
+    classes.sort();
+    var cf = window.ppContactsClass || '';
+    return '<h1>Contacts des parents</h1><p class="muted">Appelez ou écrivez directement aux parents' + (keys ? ' de vos classes' : '') + '. Ces numéros sont réservés au personnel de l’établissement.</p>'
+      + '<div class="panel"><div class="grid2" style="display:grid;grid-template-columns:2fr 1fr;gap:10px">'
+      + '<div class="field"><label>Rechercher (nom, élève, téléphone)</label><input id="ctQ" type="text" value="' + esc(window.ppContactsQuery || '') + '" oninput="window.ppContactsQuery=this.value;ppContactsRefresh()" placeholder="Ex. Dupont, 6e A, 670…"></div>'
+      + '<div class="field"><label>Classe</label><select id="ctC" onchange="window.ppContactsClass=this.value;ppContactsRefresh()"><option value="">Toutes</option>' + classes.map(function(c){ return '<option' + (nz(c) === nz(cf) ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select></div></div>'
+      + '<div id="ctList" style="margin-top:6px">' + contactItems() + '</div></div>';
+  }
+  var priorAccess2 = window.canAccessPage;
+  window.canAccessPage = function(p){ if (p === 'contacts') return contactRole(); return typeof priorAccess2 === 'function' ? priorAccess2(p) : true; };
+  var priorView2 = window.view;
+  window.view = function(){ if (typeof page !== 'undefined' && page === 'contacts') return contactsView(); return typeof priorView2 === 'function' ? priorView2.apply(this, arguments) : ''; };
+  function callUi(){
+    try {
+      if (!state || !state.user) return;
+      var c = document.querySelector('.content'), nav = document.querySelector('.nav');
+      /* entrée de menu « Contacts » pour enseignants et surveillant */
+      if (nav && !nav.querySelector('[data-page="contacts"]') && contactRole() && !(typeof isAdmin === 'function' && isAdmin())) {
+        var b = document.createElement('button'); b.type = 'button'; b.setAttribute('data-page', 'contacts'); b.setAttribute('aria-label', 'Contacts parents');
+        b.className = (typeof page !== 'undefined' && page === 'contacts') ? 'active' : ''; b.textContent = 'Contacts'; b.onclick = function(){ go('contacts'); };
+        var after = nav.querySelector('[data-page="messages"]') || nav.querySelector('[data-page="communication"]');
+        if (after && after.nextSibling) nav.insertBefore(b, after.nextSibling); else nav.appendChild(b);
+      }
+      if (!c) return;
+      /* « Appeler » à côté de chaque bouton « Écrire » d'une fiche parent */
+      if (contactRole()) {
+        c.querySelectorAll('button[onclick^="messageParent("]').forEach(function(btn){
+          if (btn.closest('#ctList') || btn.parentNode.querySelector('.pp-call')) return;
+          var m = /messageParent\((\d+)\)/.exec(btn.getAttribute('onclick')); if (!m) return;
+          var p = parentById(m[1]); if (!p) return;
+          var tmp = document.createElement('span'); tmp.innerHTML = callAnchor(p.phone, '📞 Appeler', 'pp-call').replace('<a ', '<a onclick="ppLogCall(' + Number(p.id) + ')" ');
+          btn.parentNode.insertBefore(tmp.firstChild, btn.nextSibling);
+        });
+        /* vie scolaire : appeler le parent d'un élève absent */
+        c.querySelectorAll('button[onclick^="vsRemindParent("]').forEach(function(btn){
+          if (btn.parentNode.querySelector('.pp-call')) return;
+          var m = /vsRemindParent\(([^)]*)\)/.exec(btn.getAttribute('onclick')); if (!m) return;
+          var id = m[1].replace(/['"]/g, ''), a = (state.absences || []).filter(function(x){ return String(x.id) === id; })[0]; if (!a) return;
+          var par = (state.parents || []).filter(function(p){ return kidsOf(p).some(function(k){ return nz(k.name) === nz(a.student) && (!a.className || nz(k.className) === nz(a.className)); }); })[0];
+          if (!par) return;
+          var tmp = document.createElement('span'); tmp.innerHTML = callAnchor(par.phone, '📞 Appeler le parent', 'pp-call').replace('<a ', '<a onclick="ppLogCall(' + Number(par.id) + ')" ');
+          btn.parentNode.insertBefore(tmp.firstChild, btn.nextSibling);
+        });
+      }
+      /* accueil du personnel : raccourci « Contacts parents » */
+      if (contactRole() && typeof page !== 'undefined' && page === 'home') {
+        var qp = [].slice.call(c.querySelectorAll('.panel')).filter(function(x){ var h = x.querySelector('h3,h2'); return h && /Actions rapides/.test(h.textContent); })[0];
+        if (qp && !qp.querySelector('.pp-contacts-quick')) { var qb = document.createElement('button'); qb.type = 'button'; qb.className = 'btn call pp-contacts-quick'; qb.textContent = '📞 Appeler un parent'; qb.onclick = function(){ go('contacts'); }; qp.appendChild(qb); }
+      }
+      /* parent : appeler l'établissement */
+      var sch = state.school && state.school.phone;
+      if (sch && !contactRole()) {
+        var pn = [].slice.call(c.querySelectorAll('.panel')).filter(function(x){ var h = x.querySelector('h3,h2'); return h && /Actions rapides/.test(h.textContent); })[0];
+        if (pn && !pn.querySelector('.pp-call-school')) { var sp = document.createElement('span'); sp.innerHTML = callAnchor(sch, '📞 Appeler l’école', 'pp-call-school'); pn.appendChild(sp.firstChild); }
+      }
+    } catch (e) {}
+  }
+  setInterval(callUi, 900);
+})();
+
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { createStore } = require('./store');
 
-const VERSION = '1.1.0';
+const VERSION = '1.0.0';
 const SERVICE = 'portail-parents-server';
 const PORT = Number(process.env.PORT) || 3000;
 const MAX_BODY = (Number(process.env.MAX_BODY_MB) || 30) * 1024 * 1024;
@@ -19,7 +19,7 @@ const ROOT_ALLOWED = new Set(['index.html', 'manifest.json', 'sw.js', 'icon-192.
 
 /* ---------- jeux de clés synchronisées ---------- */
 const ARRAY_ADMIN = ['teachers', 'parents', 'classes', 'subjects', 'sequences', 'templates', 'events', 'annonces', 'students'];
-const OBJECT_ADMIN = ['classPrincipals', 'supervisor', 'profiles', 'smsSettings', 'whatsappSettings'];
+const OBJECT_ADMIN = ['classPrincipals', 'supervisor', 'profiles', 'smsSettings', 'whatsappSettings', 'school'];
 const SHARED = ['messages', 'bulletins', 'bulletinRequests', 'bulletinHistory', 'grades', 'absences'];
 const MAX_RECORDS = 60000;
 const MAX_FILE = (Number(process.env.MAX_FILE_MB) || 10) * 1024 * 1024;
@@ -56,36 +56,30 @@ function freshDb() { return { revision: 0, adminRevision: 0, state: {}, accounts
 const persist = () => store.save(db);
 
 /* ---------- comptes ---------- */
-function usernamesFor(kind, rec) {
-  const u = new Set();
-  const add = v => { const n = norm(v); if (n) u.add(n); };
-  if (kind === 'teacher') { add(rec.name); add(rec.email); }
-  if (kind === 'parent') add(rec.name);
-  if (kind === 'supervisor') { add(rec.username || 'surveillant'); add(rec.name); u.add('surveillant'); }
-  const pk = phoneKey(rec.phone); if (pk) u.add('tel:' + pk);
-  return [...u];
+/* Première connexion : les parents, enseignants et le surveillant s'identifient par leur NOM et choisissent eux-mêmes un code à 4 chiffres.
+   FIRST_LOGIN_PHONE=false désactive la vérification du numéro de téléphone enregistré lors de ce premier choix. */
+const FIRST_LOGIN_PHONE = process.env.FIRST_LOGIN_PHONE !== 'false';
+const nameTokens = s => norm(s).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter(Boolean);
+function nameMatches(acc, typed) {
+  const t = nameTokens(typed);
+  if (!t.length) return false;
+  return (acc.names || []).some(n => {
+    const a = nameTokens(n);
+    if (!a.length) return false;
+    return t.every(x => a.includes(x)) || a.every(x => t.includes(x));
+  });
 }
-function credFromRecord(kind, rec) {
-  const pw = rec.password;
-  if (pw && /^[0-9a-f]{64}$/i.test(pw)) return { scheme: 'cst-sha256', hash: pw.toLowerCase() };
-  if (pw && kind === 'parent' && phoneKey(pw) && phoneKey(pw) === phoneKey(rec.phone)) return { scheme: 'phone', hash: phoneKey(pw) };
-  if (pw) return { scheme: 'plain', hash: String(pw) };
-  if (kind === 'parent' && phoneKey(rec.phone)) return { scheme: 'phone', hash: phoneKey(rec.phone) };
-  return null;
-}
+const weakPin = pin => /^(\d)\1{3}$/.test(pin) || ['1234', '4321', '0123', '3210', '1212', '2580', '0852', '1122'].includes(pin);
 function provision(kind, rec) {
   if (!rec || rec.id == null) return null;
   const id = kind + ':' + rec.id;
   let acc = db.accounts[id], created = false;
-  if (!acc) { acc = db.accounts[id] = { id, role: kind, refId: rec.id, cred: null, srcHash: null }; created = true; }
+  if (!acc) { acc = db.accounts[id] = { id, role: kind, refId: rec.id, cred: null, pending: true }; created = true; }
   acc.name = rec.name || acc.name || kind;
-  acc.usernames = usernamesFor(kind, rec);
+  acc.names = (kind === 'supervisor' ? [rec.name, rec.username || 'surveillant', 'surveillant'] : [rec.name]).filter(Boolean);
+  acc.phoneKey = phoneKey(rec.phone);
   acc.active = rec.active !== false;
-  const src = rec.password || ('phone:' + phoneKey(rec.phone));
-  if (created || acc.srcHash !== src) {
-    const c = credFromRecord(kind, rec);
-    if (c) { acc.cred = c; acc.srcHash = src; }
-  }
+  acc.pending = !acc.cred;
   return { created, account: acc };
 }
 function autoProvision() {
@@ -96,6 +90,28 @@ function autoProvision() {
   for (const id of Object.keys(db.accounts)) if (!keep.has(id)) { delete db.accounts[id]; delete db.notifs[id]; }
   for (const [h, s] of Object.entries(db.sessions)) if (!db.accounts[s.acc]) delete db.sessions[h];
 }
+function findAccounts(typed, phone) {
+  const u = norm(typed);
+  if (['admin', norm(process.env.ADMIN_USERNAME || 'admin')].includes(u)) return db.accounts.admin ? [db.accounts.admin] : [];
+  let c = Object.values(db.accounts).filter(a => a.role !== 'admin' && nameMatches(a, typed));
+  const pk = phoneKey(phone);
+  if (pk) c = c.filter(a => a.phoneKey === pk);
+  return c;
+}
+function migrateAccounts() {
+  for (const a of Object.values(db.accounts)) {
+    if (a.role === 'admin') continue;
+    if (!a.names) a.names = [a.name].filter(Boolean);
+    if (a.phoneKey === undefined) a.phoneKey = ((a.usernames || []).find(x => String(x).startsWith('tel:')) || '').slice(4);
+    a.pending = !a.cred;
+  }
+  if (process.env.RESET_ALL_ACCESS === 'true') {
+    for (const a of Object.values(db.accounts)) if (a.role !== 'admin') { a.cred = null; a.pending = true; }
+    db.sessions = Object.fromEntries(Object.entries(db.sessions).filter(([, s]) => (db.accounts[s.acc] || {}).role === 'admin'));
+    console.log('[ACCÈS] Tous les comptes (hors administrateur) devront choisir un nouveau code à 4 chiffres.');
+  }
+}
+
 function ensureAdmin() {
   const username = norm(process.env.ADMIN_USERNAME || 'admin');
   let acc = db.accounts.admin;
@@ -106,84 +122,12 @@ function ensureAdmin() {
     db.accounts.admin = { id: 'admin', role: 'admin', refId: 'admin', name: 'Administration', usernames: [...new Set(['admin', username])], active: true, cred: hashPw(pass), srcHash: null };
     persist();
   }
-  ensureExtraAdmins();
-}
-
-/**
- * Comptes administrateurs supplémentaires (principal, vice-principal, …).
- *
- * Variables d'environnement (Render) — au choix :
- *
- * 1) Liste compacte :
- *    EXTRA_ADMINS=principal:MotDePassePrincipal,vice:MotDePasseVice
- *    (identifiant:motdepasse séparés par des virgules)
- *
- * 2) Variables dédiées :
- *    PRINCIPAL_USERNAME=principal   PRINCIPAL_PASSWORD=...
- *    VICE_USERNAME=vice             VICE_PASSWORD=...
- *
- * Chaque compte a le rôle admin (mêmes droits que « admin »).
- * Les noms d'affichage : PRINCIPAL_NAME / VICE_NAME (optionnel).
- */
-function ensureExtraAdmins() {
-  const list = [];
-  const compact = String(process.env.EXTRA_ADMINS || '').trim();
-  if (compact) {
-    compact.split(',').forEach(part => {
-      const s = part.trim();
-      if (!s) return;
-      const i = s.indexOf(':');
-      if (i <= 0) return;
-      const user = s.slice(0, i).trim();
-      const pass = s.slice(i + 1).trim();
-      if (user && pass) list.push({ user, pass, name: user });
-    });
-  }
-  const pu = String(process.env.PRINCIPAL_USERNAME || 'principal').trim();
-  const pp = String(process.env.PRINCIPAL_PASSWORD || '').trim();
-  if (pp) list.push({ user: pu, pass: pp, name: String(process.env.PRINCIPAL_NAME || 'Principal').trim() || 'Principal' });
-  const vu = String(process.env.VICE_USERNAME || 'vice').trim();
-  const vp = String(process.env.VICE_PASSWORD || '').trim();
-  if (vp) list.push({ user: vu, pass: vp, name: String(process.env.VICE_NAME || 'Vice-principal').trim() || 'Vice-principal' });
-
-  let changed = false;
-  const force = process.env.RESET_ADMIN === 'true';
-  for (const item of list) {
-    const uname = norm(item.user);
-    if (!uname || uname === 'admin') continue;
-    const id = 'admin:' + uname;
-    let acc = db.accounts[id];
-    if (!acc || force) {
-      acc = db.accounts[id] = {
-        id,
-        role: 'admin',
-        refId: 'admin',
-        name: item.name || item.user,
-        usernames: [uname],
-        active: true,
-        cred: hashPw(item.pass),
-        srcHash: null
-      };
-      changed = true;
-      console.log('[ADMIN] Compte administrateur prêt :', uname, '(' + acc.name + ')');
-    } else {
-      // Mettre à jour le mot de passe si la variable change (optionnel via RESET_EXTRA_ADMINS)
-      if (process.env.RESET_EXTRA_ADMINS === 'true') {
-        acc.cred = hashPw(item.pass);
-        acc.name = item.name || acc.name;
-        acc.usernames = [uname];
-        acc.active = true;
-        changed = true;
-      }
-    }
-  }
-  if (changed) persist();
 }
 
 /* ---------- sessions et limitation de débit ---------- */
 const attempts = new Map();
-function tooMany(key) { const a = attempts.get(key); return a && a.n >= 8 && Date.now() - a.t < 10 * 60 * 1000; }
-function noteFail(key) { const a = attempts.get(key); if (!a || Date.now() - a.t > 10 * 60 * 1000) attempts.set(key, { n: 1, t: Date.now() }); else a.n++; }
+function tooMany(key, max = 8, win = 10 * 60 * 1000) { const a = attempts.get(key); return !!(a && a.n >= max && Date.now() - a.t < win); }
+function noteFail(key, win = 10 * 60 * 1000) { const a = attempts.get(key); if (!a || Date.now() - a.t > win) attempts.set(key, { n: 1, t: Date.now() }); else a.n++; }
 function newSession(acc) {
   const token = crypto.randomBytes(32).toString('base64url');
   const now = Date.now();
@@ -200,7 +144,7 @@ function authenticate(req) {
   return acc && acc.active ? acc : null;
 }
 function publicUser(acc) {
-  return { id: acc.role === 'admin' ? 'admin' : acc.refId, role: acc.role, username: (acc.usernames || []).find(u => !u.startsWith('tel:')) || acc.id, name: acc.name };
+  return { id: acc.role === 'admin' ? 'admin' : acc.refId, role: acc.role, username: (acc.names || acc.usernames || [])[0] || acc.id, name: acc.name };
 }
 
 /* ---------- contexte d'un utilisateur ---------- */
@@ -227,8 +171,8 @@ function visibleMsg(m, ctx) {
   if (ctx.role === 'teacher') {
     if (!me) return false;
     return m.to === me.name || m.from === me.name ||
-      (m.recipientRole === 'teacher' && String(m.recipientId) === String(me.id)) ||
-      (m.senderRole === 'teacher' && String(m.senderId) === String(me.id));
+      (m.recipientRole === 'teacher' && idIs(m.recipientId, 'teacher', me.id)) ||
+      (m.senderRole === 'teacher' && idIs(m.senderId, 'teacher', me.id));
   }
   if (ctx.role === 'supervisor') {
     return m.recipientRole === 'supervisor' || m.senderRole === 'supervisor' || (me && (m.to === me.name || m.from === me.name)) || m.group === 'ALL';
@@ -263,6 +207,9 @@ function mergeRecord(key, old, inc) {
 const MUT_MSG = ['read', 'readBy', 'readAt', 'deliveryStatus', 'deliveredAt', 'sentAt', 'starred'];
 const pick = (src, fields) => { const o = {}; fields.forEach(f => { if (src[f] !== undefined) o[f] = src[f]; }); return o; };
 
+/* Identifiant d'expéditeur : accepte 12 ou "teacher:12" / "supervisor:1". */
+const idIs = (v, role, ref) => String(v) === String(ref) || String(v) === role + ':' + ref;
+
 /* Renvoie l'enregistrement fusionné, ou null si l'écriture n'est pas autorisée. */
 function authorize(key, old, raw, ctx) {
   const role = ctx.role, ref = ctx.ref;
@@ -270,7 +217,7 @@ function authorize(key, old, raw, ctx) {
   switch (key) {
     case 'messages': {
       if (old) { if (!visibleMsg(old, ctx)) return null; return mergeRecord(key, old, pick(raw, MUT_MSG)); }
-      if (raw.senderRole && (raw.senderRole !== role || String(raw.senderId) !== String(ref))) return null;
+      if (raw.senderRole && (raw.senderRole !== role || !idIs(raw.senderId, role, ref))) return null;
       if (role === 'parent' && (raw.group || raw.groupId)) return null;
       if (role === 'teacher' && raw.group && (raw.group === 'ALL' || !inClasses(ctx, raw.group))) return null;
       if (role === 'teacher' && raw.parentId != null && !(db.state.parents || []).some(p => String(p.id) === String(raw.parentId))) return null;
@@ -343,6 +290,7 @@ function viewFor(ctx) {
   }
   ['classes', 'subjects', 'sequences', 'events', 'annonces'].forEach(k => { out[k] = A(k); });
   out.classPrincipals = isObj(st.classPrincipals) ? st.classPrincipals : {};
+  if (isObj(st.school) && Object.keys(st.school).length) out.school = st.school;   // nom, année et téléphone de l'établissement (public)
   const msgs = A('messages').filter(m => visibleMsg(m, ctx));
   out.messages = msgs;
   if (role === 'parent') {
@@ -386,25 +334,59 @@ const need = (c, status, msg) => { if (!c) throw new HttpError(status, msg); };
 function login(body, ip) {
   need(isObj(body), 400, 'Requête invalide');
   const u = String(body.username || '').trim(), pw = String(body.password || '');
-  need(u && pw, 400, 'Identifiant et mot de passe requis');
-  const limitKey = ip + '|' + norm(u);
-  need(!tooMany(limitKey), 429, 'Trop de tentatives. Réessayez dans 10 minutes.');
-  const keys = [norm(u)];
-  if (phoneKey(u)) keys.push('tel:' + phoneKey(u));
-  const cands = Object.values(db.accounts).filter(a => a.usernames.some(x => keys.includes(x)));
-  let matched = null, disabled = false;
-  for (const a of cands) {
-    if (verifyCred(a.cred, pw)) { if (a.active) { matched = a; break; } disabled = true; }
-  }
-  if (!matched) {
+  need(u && pw, 400, 'Nom et code requis');
+  const k1 = ip + '|' + norm(u), k2 = 'nom|' + norm(u);
+  need(!tooMany(k1) && !tooMany(k2, 15, 15 * 60 * 1000), 429, 'Trop de tentatives. Réessayez dans quelques minutes.');
+  const cands = findAccounts(u, body.phone).filter(a => a.cred);
+  const ok = [];
+  let disabled = false;
+  for (const a of cands) if (verifyCred(a.cred, pw)) { if (a.active) ok.push(a); else disabled = true; }
+  if (ok.length > 1) throw new HttpError(409, 'Plusieurs comptes portent ce nom : ajoutez votre numéro de téléphone');
+  if (!ok.length) {
     if (disabled) throw new HttpError(403, 'Compte désactivé');
-    noteFail(limitKey); throw new HttpError(401, 'Identifiants incorrects');
+    noteFail(k1); noteFail(k2, 15 * 60 * 1000); throw new HttpError(401, 'Identifiants incorrects');
   }
-  attempts.delete(limitKey);
+  const matched = ok[0];
+  attempts.delete(k1);
   if (matched.cred.scheme !== 'scrypt') matched.cred = hashPw(pw);   // montée en gamme du hachage
   const token = newSession(matched);
   persist();
   return { token, expiresIn: SESSION_TTL, user: publicUser(matched) };
+}
+
+/* État d'un compte avant connexion : « pending » = première connexion (aucun code choisi). Ne révèle rien sur un nom inconnu. */
+function authStatus(body) {
+  need(isObj(body), 400, 'Requête invalide');
+  const c = findAccounts(body.username, body.phone).filter(a => a.active);
+  if (!c.length && FIRST_LOGIN_PHONE && !phoneKey(body.phone)) {
+    const nophone = findAccounts(body.username, '').filter(a => a.active && !a.cred && !a.phoneKey);
+    if (nophone.length === 1) return { status: 'pending', displayName: nophone[0].name, requiresPhone: true, noPhoneOnRecord: true };
+  }
+  if (!c.length) return { status: 'active' };
+  if (c.length > 1) return { status: 'ambiguous' };
+  const a = c[0];
+  if (a.role === 'admin' || a.cred) return { status: 'active' };
+  return { status: 'pending', displayName: a.name, requiresPhone: FIRST_LOGIN_PHONE };
+}
+
+function setupPin(body, ip) {
+  need(isObj(body), 400, 'Requête invalide');
+  const u = String(body.username || '').trim(), pin = String(body.pin || ''), phone = String(body.phone || '');
+  need(u, 400, 'Nom requis');
+  need(/^\d{4}$/.test(pin), 400, 'Le code doit comporter exactement 4 chiffres');
+  need(!weakPin(pin), 400, 'Code trop simple : évitez 1234, 0000, 1111…');
+  if (FIRST_LOGIN_PHONE) need(phoneKey(phone), 400, 'Numéro de téléphone requis pour la première connexion');
+  const lk = ip + '|setup|' + norm(u);
+  need(!tooMany(lk), 429, 'Trop de tentatives. Réessayez dans quelques minutes.');
+  const c = findAccounts(u, FIRST_LOGIN_PHONE ? phone : '').filter(a => a.active && !a.cred);
+  if (!c.length) { noteFail(lk); throw new HttpError(404, 'Aucun compte à activer pour ces informations. Vérifiez votre nom et votre numéro, ou contactez l’administration.'); }
+  if (c.length > 1) throw new HttpError(409, 'Plusieurs comptes portent ce nom : contactez l’administration');
+  const a = c[0];
+  a.cred = hashPw(pin); a.pending = false;
+  attempts.delete(lk);
+  const token = newSession(a);
+  persist();
+  return { token, expiresIn: SESSION_TTL, user: publicUser(a) };
 }
 
 function sync(acc, body) {
@@ -483,9 +465,21 @@ function syncNotifications(acc, body) {
 function changePassword(acc, body) {
   need(isObj(body), 400, 'Requête invalide');
   const cur = String(body.currentPassword || ''), next = String(body.newPassword || '');
-  need(next.length >= 6 && next !== '1234', 400, 'Nouveau mot de passe trop faible (6 caractères minimum)');
+  if (acc.role === 'admin') need(next.length >= 6 && next !== '1234', 400, 'Nouveau mot de passe trop faible (6 caractères minimum)');
+  else need(/^\d{4}$/.test(next) && !weakPin(next), 400, 'Le code doit comporter 4 chiffres (évitez 1234, 0000, 1111…)');
   need(verifyCred(acc.cred, cur), 403, 'Mot de passe actuel incorrect');
   acc.cred = hashPw(next);
+  persist();
+  return { ok: true };
+}
+
+function resetAccess(acc, body) {
+  need(acc.role === 'admin', 403, 'Accès administrateur requis');
+  need(isObj(body) && ['teacher', 'parent', 'supervisor'].includes(body.kind), 400, 'Type de compte invalide');
+  const a = db.accounts[body.kind + ':' + body.id];
+  need(a, 404, 'Compte introuvable : synchronisez d’abord');
+  a.cred = null; a.pending = true;
+  for (const [h, s] of Object.entries(db.sessions)) if (s.acc === a.id) delete db.sessions[h];
   persist();
   return { ok: true };
 }
@@ -524,6 +518,8 @@ async function route(req, res, url, body, ip) {
   const p = url.pathname, m = req.method;
   if (p === '/api/health' && m === 'GET') return { ok: true, service: SERVICE, version: VERSION, time: new Date().toISOString(), revision: db.revision };
   if (p === '/api/auth/login' && m === 'POST') return login(body, ip);
+  if (p === '/api/auth/status' && m === 'POST') return authStatus(body);
+  if (p === '/api/auth/setup' && m === 'POST') return setupPin(body, ip);
   const acc = authenticate(req);
   need(acc, 401, 'Session expirée ou invalide');
   if (p === '/api/auth/logout' && m === 'POST') { const h = sha256(/^Bearer (.+)$/.exec(req.headers.authorization)[1]); delete db.sessions[h]; persist(); return { ok: true }; }
@@ -540,6 +536,7 @@ async function route(req, res, url, body, ip) {
   let mm = /^\/api\/messages\/([^/]+)\/read$/.exec(p);
   if (mm && m === 'POST') return markRead(acc, decodeURIComponent(mm[1]), body);
   if (p === '/api/notifications/sync' && m === 'POST') return syncNotifications(acc, body);
+  if (p === '/api/admin/users/reset' && m === 'POST') return resetAccess(acc, body);
   if (p === '/api/admin/users/provision' && m === 'POST') {
     need(acc.role === 'admin', 403, 'Accès administrateur requis');
     need(isObj(body) && ['teacher', 'parent', 'supervisor'].includes(body.kind), 400, 'Type de compte invalide');
@@ -634,6 +631,8 @@ async function start() {
   ['accounts', 'sessions', 'notifs', 'state', 'files'].forEach(k => { if (!db[k]) db[k] = {}; });
   db.revision = db.revision || 0; db.adminRevision = db.adminRevision || 0;
   ensureAdmin();
+  migrateAccounts();
+  persist();
   server.listen(PORT, () => console.log(`${SERVICE} ${VERSION} — port ${PORT} — stockage : ${store.kind} — révision ${db.revision}`));
 }
 async function stop() { console.log('Arrêt : sauvegarde des données…'); server.close(); try { await store.flush(); } catch (e) {} process.exit(0); }
