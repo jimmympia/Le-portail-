@@ -48,6 +48,22 @@ Un seul service qui fait deux choses : il **héberge l'application** (dossier `p
 
 ---
 
+## Notifications et sauvegardes automatiques
+
+### Notifications push (le téléphone sonne, application fermée)
+- Elles s'activent depuis l'application : à la connexion, le téléphone demande l'autorisation, ou bien **Profil → Notifications → Activer**. L'administrateur voit le nombre d'appareils abonnés dans **Maintenance**.
+- Qui est prévenu : le destinataire d'un **message**, tous les parents et enseignants pour une **annonce**, le parent d'un élève pour une **absence**. Le texte reste discret (« De Parent A ») : ni le contenu des messages ni le nom de l'enfant n'apparaissent sur l'écran verrouillé.
+- **Android / APK** : fonctionne directement. **iPhone** : il faut d'abord ajouter l'application à l'écran d'accueil (Partager → Sur l'écran d'accueil), iOS 16.4 ou plus récent.
+- Un téléphone qui se déconnecte est désabonné ; un abonnement expiré est supprimé automatiquement.
+- Les clés d'envoi (VAPID) sont créées au premier démarrage et **conservées dans la base** : gardez `DATABASE_URL` (Neon), sinon elles changent à chaque redémarrage de Render et les téléphones doivent se réabonner (l'application le fait seule à la connexion suivante).
+- Variables : `PUSH_ENABLED=false` pour tout désactiver, `VAPID_SUBJECT` (adresse de contact, par défaut `mailto:admin@cst-manjo.cm`).
+
+### Sauvegardes automatiques du serveur
+- Le serveur sauvegarde **toutes les 24 h** (dès qu'il est utilisé, même s'il dormait) et garde les **30 dernières**. Variables : `BACKUP_EVERY_HOURS`, `BACKUP_KEEP`.
+- **Maintenance → Sauvegardes automatiques du serveur** : liste, **Sauvegarder maintenant**, **Télécharger** (fichier JSON lisible) et **Restaurer** (double confirmation ; une sauvegarde « avant restauration » est créée juste avant).
+- Une sauvegarde contient les comptes, messages, notes, absences, parents, enseignants, annonces. Les **codes** des utilisateurs sont conservés tels quels lors d'une restauration. Les **PDF de bulletins** sont stockés à part (table `pp_files`) et ne sont pas inclus ; ils restent disponibles tant qu'une sauvegarde les référence (14 jours minimum après remplacement).
+- Pensez aussi à télécharger une sauvegarde de temps en temps sur votre téléphone : la base Neon gratuite est la seule copie côté serveur.
+
 ## À savoir
 
 | Sujet | Détail |
@@ -63,15 +79,15 @@ Un seul service qui fait deux choses : il **héberge l'application** (dossier `p
 
 ## Variables d'environnement
 
-`ADMIN_PASSWORD` · `DATABASE_URL` · `FIRST_LOGIN_PHONE` · `RESET_ALL_ACCESS` · `MAX_FILE_MB` · `ADMIN_USERNAME` (défaut `admin`) · `RESET_ADMIN` · `ALLOWED_ORIGINS` (défaut `*`) · `MAX_BODY_MB` · `DATA_DIR` (mode fichier) · `PGSSL=disable` (base locale sans SSL) · `PORT`
+`ADMIN_PASSWORD` · `DATABASE_URL` · `FIRST_LOGIN_PHONE` · `RESET_ALL_ACCESS` · `MAX_FILE_MB` · `PUSH_ENABLED` · `VAPID_SUBJECT` · `BACKUP_EVERY_HOURS` · `BACKUP_KEEP` · `ADMIN_USERNAME` (défaut `admin`) · `RESET_ADMIN` · `ALLOWED_ORIGINS` (défaut `*`) · `MAX_BODY_MB` · `DATA_DIR` (mode fichier) · `PGSSL=disable` (base locale sans SSL) · `PORT`
 
 ## Essai en local
 
 ```
 ADMIN_PASSWORD=MonMotDePasse node server.js     # http://localhost:3000
-npm test                                        # 90 vérifications de l'API
+npm test                                        # 135 vérifications de l'API
 ```
 
 ## Routes
 
-`GET /api/health` · `POST /api/auth/login` · `POST /api/auth/status` · `POST /api/auth/setup` · `POST /api/auth/logout` · `POST /api/auth/password` · `POST /api/sync` · `POST /api/messages` · `POST /api/messages/:id/read` · `POST /api/notifications/sync` · `POST /api/admin/users/provision` · `POST /api/admin/users/reset` · `POST /api/files` · `GET /api/files/:id`
+`GET /api/health` · `POST /api/auth/login` · `POST /api/auth/status` · `POST /api/auth/setup` · `POST /api/auth/logout` · `POST /api/auth/password` · `POST /api/sync` · `POST /api/messages` · `POST /api/messages/:id/read` · `POST /api/notifications/sync` · `POST /api/admin/users/provision` · `POST /api/admin/users/reset` · `POST /api/files` · `GET /api/files/:id` · `GET /api/push/key` · `POST /api/push/subscribe` · `POST /api/push/unsubscribe` · `POST /api/push/test` · `GET /api/admin/push` · `GET/POST /api/admin/backups` · `GET /api/admin/backups/:id` · `POST /api/admin/backups/:id/restore`

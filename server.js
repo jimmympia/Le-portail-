@@ -4,9 +4,11 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { createStore } = require('./store');
+const push = require('./push');
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const SERVICE = 'portail-parents-server';
 const PORT = Number(process.env.PORT) || 3000;
 const MAX_BODY = (Number(process.env.MAX_BODY_MB) || 30) * 1024 * 1024;
@@ -23,6 +25,11 @@ const OBJECT_ADMIN = ['classPrincipals', 'supervisor', 'profiles', 'smsSettings'
 const SHARED = ['messages', 'bulletins', 'bulletinRequests', 'bulletinHistory', 'grades', 'absences'];
 const MAX_RECORDS = 60000;
 const MAX_FILE = (Number(process.env.MAX_FILE_MB) || 10) * 1024 * 1024;
+const PUSH_ON = process.env.PUSH_ENABLED !== 'false';
+const PUSH_ALLOW_ANY = process.env.PUSH_ALLOW_ANY === 'true';      // tests uniquement
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@cst-manjo.cm';
+const BACKUP_EVERY = Number(process.env.BACKUP_EVERY_MS) || (Number(process.env.BACKUP_EVERY_HOURS) || 24) * 3600 * 1000;
+const BACKUP_KEEP = Number(process.env.BACKUP_KEEP) || 30;
 
 /* ---------- utilitaires ---------- */
 const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
@@ -52,7 +59,7 @@ function verifyCred(cred, pw) {
 /* ---------- base en mémoire ---------- */
 const store = createStore();
 let db = null;
-function freshDb() { return { revision: 0, adminRevision: 0, state: {}, accounts: {}, sessions: {}, notifs: {}, createdAt: new Date().toISOString() }; }
+function freshDb() { return { revision: 0, adminRevision: 0, state: {}, accounts: {}, sessions: {}, notifs: {}, files: {}, push: {}, vapid: null, lastBackupAt: 0, createdAt: new Date().toISOString() }; }
 const persist = () => store.save(db);
 
 /* ---------- comptes ---------- */
@@ -351,6 +358,7 @@ function login(body, ip) {
   if (matched.cred.scheme !== 'scrypt') matched.cred = hashPw(pw);   // montée en gamme du hachage
   const token = newSession(matched);
   persist();
+  maybeBackup();
   return { token, expiresIn: SESSION_TTL, user: publicUser(matched) };
 }
 
@@ -393,6 +401,7 @@ function sync(acc, body) {
   need(isObj(body) && isObj(body.state), 400, 'État manquant');
   const ctx = ctxFor(acc), posted = body.state, base = Number(body.baseRevision || 0);
   const rev = db.revision + 1;
+  const prev = { messages: new Set((db.state.messages || []).map(m => String(m.id))), annonces: new Set((db.state.annonces || []).map(m => String(m.id))), absences: new Set((db.state.absences || []).map(m => String(m.id))) };
   let changed = false, serverWins = false;
   if (acc.role === 'admin') {
     const seed = db.revision === 0;
@@ -408,8 +417,12 @@ function sync(acc, body) {
   }
   const allowDelete = acc.role === 'admin' && !serverWins;
   SHARED.forEach(k => { if (Array.isArray(posted[k]) && mergeShared(k, posted[k], ctx, base, allowDelete, rev)) changed = true; });
-  if (changed) db.revision = rev;
+  if (changed) {
+    db.revision = rev;
+    schedulePush({ messages: (db.state.messages || []).filter(m => !prev.messages.has(String(m.id))), annonces: (db.state.annonces || []).filter(m => !prev.annonces.has(String(m.id))), absences: (db.state.absences || []).filter(m => !prev.absences.has(String(m.id))) });
+  }
   persist();
+  maybeBackup();
   const res = { revision: db.revision, serverTime: new Date().toISOString(), state: viewFor(ctxFor(acc)) };
   if (serverWins) { res.serverWins = true; res.notice = "Un autre appareil administrateur avait modifié les données : la version du serveur a été récupérée."; }
   return res;
@@ -423,7 +436,7 @@ function publishMessage(acc, body) {
   const raw = Object.assign({}, body.message); delete raw._rev;
   const res = authorize('messages', old, raw, ctx);
   need(res, 403, 'Envoi non autorisé');
-  if (!old) { res.sentAt = res.sentAt || new Date().toISOString(); res.deliveryStatus = 'sent'; res._rev = rev; arr.push(res); db.revision = rev; }
+  if (!old) { res.sentAt = res.sentAt || new Date().toISOString(); res.deliveryStatus = 'sent'; res._rev = rev; arr.push(res); db.revision = rev; schedulePush({ messages: [res] }); }
   else if (!same(old, res)) { Object.assign(old, res, { _rev: rev }); db.revision = rev; }
   persist();
   const stored = old || res;
@@ -484,6 +497,101 @@ function resetAccess(acc, body) {
   return { ok: true };
 }
 
+/* ---------- notifications push ---------- */
+const subsOf = id => (db.push && db.push[id]) || [];
+function addressed(a, m) {
+  if (m.senderRole === a.role && idIs(m.senderId, a.role, a.refId)) return false;
+  if (a.role === 'admin') return m.senderRole !== 'admin' && (m.recipientRole === 'admin' || m.to === 'Administration');
+  if ((a.names || []).some(n => n && n === m.from)) return false;
+  return visibleMsg(m, ctxFor(a));
+}
+function absenceFor(a, x) {
+  const ctx = ctxFor(a), p = ctx.me;
+  if (!p || !inClasses(ctx, x.className)) return false;
+  const kids = (p.children || []).map(c => norm(typeof c === 'object' ? c.name : c)).concat(norm(p.student));
+  return kids.includes(norm(x.student));
+}
+async function pushToAccount(a, payload) {
+  let sent = 0, failed = 0;
+  for (const sub of subsOf(a.id).slice()) {
+    try {
+      const r = await push.send(sub, payload, db.vapid, { subject: VAPID_SUBJECT });
+      if (r.status >= 200 && r.status < 300) sent++;
+      else { failed++; if (r.status === 404 || r.status === 410) db.push[a.id] = subsOf(a.id).filter(x => x.endpoint !== sub.endpoint); }
+    } catch (e) { failed++; }
+  }
+  if (failed) persist();
+  return { sent, failed };
+}
+async function notifyFresh(fresh) {
+  if (!PUSH_ON || !db.vapid) return;
+  const accs = Object.values(db.accounts).filter(a => a.active && subsOf(a.id).length);
+  for (const a of accs) {
+    const msgs = (fresh.messages || []).filter(m => addressed(a, m));
+    if (msgs.length) await pushToAccount(a, { title: 'Nouveau message', body: msgs.length === 1 ? 'De ' + (msgs[0].from || 'l’établissement') : msgs.length + ' nouveaux messages', tag: 'pp-msg', page: 'messages' });
+    if (a.role !== 'admin' && (fresh.annonces || []).length) { const an = fresh.annonces; await pushToAccount(a, { title: 'Nouvelle annonce', body: an.length === 1 ? String(an[0].title || 'Annonce de l’établissement').slice(0, 90) : an.length + ' nouvelles annonces', tag: 'pp-annonce', page: 'annonces' }); }
+    if (a.role === 'parent' && (fresh.absences || []).some(x => absenceFor(a, x))) await pushToAccount(a, { title: 'Absence signalée', body: 'Une absence a été enregistrée pour votre enfant.', tag: 'pp-absence', page: 'suivi' });
+  }
+}
+function schedulePush(fresh) {
+  if (!PUSH_ON || !((fresh.messages || []).length || (fresh.annonces || []).length || (fresh.absences || []).length)) return;
+  setImmediate(() => notifyFresh(fresh).catch(e => console.error('[push]', e.message)));
+}
+function subscribePush(acc, body) {
+  need(isObj(body) && isObj(body.subscription), 400, 'Abonnement manquant');
+  const sub = body.subscription, ep = String(sub.endpoint || ''), keys = isObj(sub.keys) ? sub.keys : {};
+  need(push.endpointAllowed(ep, PUSH_ALLOW_ANY), 400, 'Service de notification non pris en charge');
+  const k = push.unb64u(keys.p256dh || ''), au = push.unb64u(keys.auth || '');
+  need(k.length === 65 && k[0] === 4 && au.length === 16, 400, 'Clés de notification invalides');
+  for (const id of Object.keys(db.push)) db.push[id] = db.push[id].filter(x => x.endpoint !== ep);
+  const list = db.push[acc.id] || (db.push[acc.id] = []);
+  list.push({ endpoint: ep, keys: { p256dh: keys.p256dh, auth: keys.auth }, createdAt: Date.now(), ua: String(body.ua || '').slice(0, 80) });
+  while (list.length > 5) list.shift();
+  persist();
+  return { ok: true, devices: list.length, enabled: PUSH_ON };
+}
+function unsubscribePush(acc, body) {
+  const ep = isObj(body) ? String(body.endpoint || '') : '';
+  db.push[acc.id] = subsOf(acc.id).filter(x => x.endpoint !== ep);
+  persist();
+  return { ok: true };
+}
+
+/* ---------- sauvegardes automatiques ---------- */
+let backupBusy = false;
+async function createBackup(kind) {
+  const snap = { app: SERVICE, version: VERSION, createdAt: new Date().toISOString(), revision: db.revision, state: db.state };
+  const buf = zlib.gzipSync(Buffer.from(JSON.stringify(snap)));
+  const meta = {
+    id: snap.createdAt.replace(/\D/g, '').slice(0, 14) + '-' + crypto.randomBytes(2).toString('hex'), kind, createdAt: snap.createdAt, size: buf.length, revision: db.revision,
+    counts: { parents: (db.state.parents || []).length, teachers: (db.state.teachers || []).length, messages: (db.state.messages || []).length, bulletins: (db.state.bulletins || []).length }
+  };
+  await store.putBackup(meta, buf);
+  await store.pruneBackups(BACKUP_KEEP);
+  db.lastBackupAt = Date.now();
+  persist();
+  return meta;
+}
+async function maybeBackup() {
+  if (backupBusy || !db || db.revision === 0 || Date.now() - (db.lastBackupAt || 0) < BACKUP_EVERY) return;
+  backupBusy = true;
+  try { await createBackup('automatique'); } catch (e) { console.error('[sauvegarde]', e.message); } finally { backupBusy = false; }
+}
+async function restoreBackup(id) {
+  const buf = await store.getBackup(id);
+  need(buf, 404, 'Sauvegarde introuvable');
+  let snap;
+  try { snap = JSON.parse(zlib.gunzipSync(buf).toString('utf8')); } catch (e) { throw new HttpError(400, 'Sauvegarde illisible'); }
+  need(isObj(snap) && isObj(snap.state), 400, 'Sauvegarde invalide');
+  await createBackup('avant-restauration');
+  db.state = snap.state;
+  autoProvision();
+  const rev = db.revision + 1;
+  db.revision = rev; db.adminRevision = rev;
+  persist();
+  return { ok: true, revision: rev };
+}
+
 /* ---------- fichiers (bulletins PDF) ---------- */
 function canReadFile(acc, id) {
   const b = (db.state.bulletins || []).find(x => x.fileId === id);
@@ -511,7 +619,7 @@ async function uploadFile(acc, body) {
 }
 async function gcFiles() {
   const used = new Set((db.state.bulletins || []).map(b => b.fileId).filter(Boolean));
-  for (const [id, f] of Object.entries(db.files)) if (!used.has(id) && Date.now() - f.createdAt > 30 * 60 * 1000) { delete db.files[id]; await store.delFile(id); }
+  for (const [id, f] of Object.entries(db.files)) if (!used.has(id) && Date.now() - f.createdAt > 14 * 24 * 3600 * 1000) { delete db.files[id]; await store.delFile(id); }
 }
 
 async function route(req, res, url, body, ip) {
@@ -520,10 +628,34 @@ async function route(req, res, url, body, ip) {
   if (p === '/api/auth/login' && m === 'POST') return login(body, ip);
   if (p === '/api/auth/status' && m === 'POST') return authStatus(body);
   if (p === '/api/auth/setup' && m === 'POST') return setupPin(body, ip);
+  if (p === '/api/push/key' && m === 'GET') return { publicKey: db.vapid ? db.vapid.publicKey : null, enabled: PUSH_ON && !!db.vapid };
   const acc = authenticate(req);
   need(acc, 401, 'Session expirée ou invalide');
   if (p === '/api/auth/logout' && m === 'POST') { const h = sha256(/^Bearer (.+)$/.exec(req.headers.authorization)[1]); delete db.sessions[h]; persist(); return { ok: true }; }
   if (p === '/api/auth/password' && m === 'POST') return changePassword(acc, body);
+  if (p === '/api/push/subscribe' && m === 'POST') return subscribePush(acc, body);
+  if (p === '/api/push/unsubscribe' && m === 'POST') return unsubscribePush(acc, body);
+  if (p === '/api/push/test' && m === 'POST') { const r = await pushToAccount(acc, { title: 'Notifications activées ✓', body: 'Vous recevrez ici les nouveaux messages et annonces.', tag: 'pp-test', page: 'home' }); return Object.assign({ devices: subsOf(acc.id).length }, r); }
+  if (p === '/api/admin/push' && m === 'GET') {
+    need(acc.role === 'admin', 403, 'Accès administrateur requis');
+    const by = {}; let n = 0;
+    for (const [id, l] of Object.entries(db.push)) { const a = db.accounts[id]; if (a && l.length) { by[a.role] = (by[a.role] || 0) + l.length; n += l.length; } }
+    return { enabled: PUSH_ON, devices: n, byRole: by };
+  }
+  if (p === '/api/admin/backups' && m === 'GET') {
+    need(acc.role === 'admin', 403, 'Accès administrateur requis');
+    return { backups: await store.listBackups(), lastBackupAt: db.lastBackupAt || 0, everyHours: Math.round(BACKUP_EVERY / 360000) / 10, keep: BACKUP_KEEP };
+  }
+  if (p === '/api/admin/backups' && m === 'POST') { need(acc.role === 'admin', 403, 'Accès administrateur requis'); return { backup: await createBackup('manuelle') }; }
+  const bm = /^\/api\/admin\/backups\/([0-9a-z-]{10,40})(\/restore)?$/.exec(p);
+  if (bm) {
+    need(acc.role === 'admin', 403, 'Accès administrateur requis');
+    if (m === 'POST' && bm[2]) return restoreBackup(bm[1]);
+    if (m === 'GET' && !bm[2]) {
+      const buf = await store.getBackup(bm[1]); need(buf, 404, 'Sauvegarde introuvable');
+      return { _binary: zlib.gunzipSync(buf), _name: 'sauvegarde-portail-' + bm[1] + '.json', _type: 'application/json; charset=utf-8' };
+    }
+  }
   if (p === '/api/files' && m === 'POST') return uploadFile(acc, body);
   let fm = /^\/api\/files\/([0-9a-f]{24})$/.exec(p);
   if (fm && m === 'GET') {
@@ -614,7 +746,7 @@ const server = http.createServer(async (req, res) => {
     const body = req.method === 'POST' ? await readBody(req) : null;
     const out = await route(req, res, url, body, ip);
     if (out && out._binary) {
-      res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': out._binary.length, 'Cache-Control': 'private, no-store', 'Content-Disposition': 'attachment; filename="' + String(out._name).replace(/[^\w.\- ]/g, '_') + '"' });
+      res.writeHead(200, { 'Content-Type': out._type || 'application/pdf', 'Content-Length': out._binary.length, 'Cache-Control': 'private, no-store', 'Content-Disposition': 'attachment; filename="' + String(out._name).replace(/[^\w.\- ]/g, '_') + '"' });
       return res.end(out._binary);
     }
     send(res, 200, out);
@@ -630,9 +762,14 @@ async function start() {
   db = (await store.load()) || freshDb();
   ['accounts', 'sessions', 'notifs', 'state', 'files'].forEach(k => { if (!db[k]) db[k] = {}; });
   db.revision = db.revision || 0; db.adminRevision = db.adminRevision || 0;
+  if (!db.push) db.push = {};
+  if (!db.vapid) db.vapid = push.generateVapid();      // clés conservées dans la base : ne jamais les changer (les abonnements en dépendent)
+  db.lastBackupAt = db.lastBackupAt || 0;
   ensureAdmin();
   migrateAccounts();
   persist();
+  setTimeout(maybeBackup, 5000);
+  setInterval(maybeBackup, 30 * 60 * 1000).unref();
   server.listen(PORT, () => console.log(`${SERVICE} ${VERSION} — port ${PORT} — stockage : ${store.kind} — révision ${db.revision}`));
 }
 async function stop() { console.log('Arrêt : sauvegarde des données…'); server.close(); try { await store.flush(); } catch (e) {} process.exit(0); }

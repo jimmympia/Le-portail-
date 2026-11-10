@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Portail Parents">
 <script>if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<title>Portail Parents — V2.3.129</title>
+<title>Portail Parents — V2.3.130</title>
 <style>
 *{box-sizing:border-box}
 :root{
@@ -9739,7 +9739,7 @@ window.__ppServerReady = (function(){
       if (!state.api || typeof state.api !== 'object') state.api = {};
       var base = originBase();
       if (!base) return;
-      if (window.__ppServerOk !== true) return;     /* 2.3.129 : jamais d'activation sans avoir vérifié le serveur */
+      if (window.__ppServerOk !== true) return;     /* 2.3.130 : jamais d'activation sans avoir vérifié le serveur */
       // Si déjà configuré manuellement vers une autre URL, ne pas écraser
       var current = (state.api.baseUrl || '').replace(/\/$/, '');
       if (current && current !== base.replace(/\/$/, '') && current.indexOf(location.hostname) === -1) {
@@ -10763,7 +10763,7 @@ html body .login-card:after{content:"Collège Saint-Thomas de Manjo · Diocèse 
 <script id="pp-fixes-125">
 (function(){
   'use strict';
-  window.GESCO_VERSION = '2.3.129';
+  window.GESCO_VERSION = '2.3.130';
   function nz(x){ return String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
   function pk(s){ var d = String(s == null ? '' : s).replace(/\D/g, ''); return d.length >= 8 ? d.slice(-9) : ''; }
   function byId(i){ return document.getElementById(i); }
@@ -11164,6 +11164,158 @@ html body .login-card:after{content:"Collège Saint-Thomas de Manjo · Diocèse 
     } catch (e) {}
   }
   setInterval(callUi, 900);
+
+  /* ===== Notifications push ===== */
+  function pushSupported(){ return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+  function isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  function isStandalone(){ try { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; } }
+  function b64uToU8(s){ var p = '='.repeat((4 - s.length % 4) % 4), raw = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')), out = new Uint8Array(raw.length); for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i); return out; }
+  function sameKey(buf, u8){ if (!buf) return false; var a = new Uint8Array(buf); if (a.length !== u8.length) return false; for (var i = 0; i < a.length; i++) if (a[i] !== u8[i]) return false; return true; }
+  async function pushState(){
+    if (!pushSupported()) return { supported: false, needsInstall: isIOS() && !isStandalone() };
+    var reg = await navigator.serviceWorker.getRegistration(), sub = reg ? await reg.pushManager.getSubscription() : null;
+    return { supported: true, permission: Notification.permission, subscribed: !!sub };
+  }
+  async function pushRegister(){
+    var key = (await apiRequest('/api/push/key')).publicKey;
+    if (!key) throw new Error('Les notifications ne sont pas disponibles sur ce serveur');
+    var reg = await navigator.serviceWorker.ready, u8 = b64uToU8(key), sub = await reg.pushManager.getSubscription();
+    if (sub && sub.options && sub.options.applicationServerKey && !sameKey(sub.options.applicationServerKey, u8)) { try { await sub.unsubscribe(); } catch (e) {} sub = null; }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8 });
+    await apiRequest('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub, ua: (navigator.userAgent || '').slice(0, 80) }) });
+    window.__ppPushToken = state.api.sessionToken;
+    return sub;
+  }
+  window.ppEnablePush = async function(){
+    if (!serverMode() || !state.api.sessionToken) return toast('Connectez-vous au serveur pour activer les notifications');
+    if (!pushSupported()) return toast(isIOS() ? 'Sur iPhone : ajoutez d’abord l’application à l’écran d’accueil, puis ouvrez-la depuis son icône.' : 'Ce navigateur ne gère pas les notifications.');
+    try {
+      var perm = await Notification.requestPermission();
+      if (perm !== 'granted') { toast('Notifications refusées : autorisez-les dans les réglages du téléphone.'); return refreshPushUi(); }
+      await pushRegister();
+      toast('Notifications activées ✓');
+      try { await apiRequest('/api/push/test', { method: 'POST', body: '{}' }); } catch (e) {}
+    } catch (e) { toast((e && e.message) || 'Activation impossible'); }
+    window.__ppPushCacheAt = 0; refreshPushUi();
+  };
+  window.ppDisablePush = async function(){
+    try {
+      var reg = await navigator.serviceWorker.getRegistration(), sub = reg && await reg.pushManager.getSubscription();
+      if (sub) { if (state.api.sessionToken) { try { await apiRequest('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) }); } catch (e) {} } await sub.unsubscribe(); }
+      toast('Notifications désactivées sur ce téléphone');
+    } catch (e) { toast('Désactivation impossible'); }
+    window.__ppPushCacheAt = 0; refreshPushUi();
+  };
+  window.ppTestPush = async function(){
+    try { var r = await apiRequest('/api/push/test', { method: 'POST', body: '{}' }); toast(r.sent ? 'Notification de test envoyée' : (r.devices ? 'Envoi impossible : réessayez' : 'Aucun appareil abonné : activez d’abord les notifications')); }
+    catch (e) { toast((e && e.message) || 'Test impossible'); }
+  };
+  window.ppDismissPush = function(){ try { localStorage.setItem('pp_push_dismiss', '1'); } catch (e) {} var b = document.querySelector('.pp-push-banner'); if (b) b.remove(); };
+  function pushBoxHtml(st){
+    if (!st.supported) return st.needsInstall ? '<p class="muted">Sur iPhone, les notifications ne fonctionnent que depuis l’icône de l’application : appuyez sur <b>Partager → Sur l’écran d’accueil</b>, puis ouvrez le Portail depuis cette icône et revenez ici.</p>' : '<p class="muted">Ce navigateur ne gère pas les notifications.</p>';
+    if (st.permission === 'denied') return '<p class="muted">Les notifications sont <b>bloquées</b> pour cette application. Autorisez-les dans les réglages du téléphone (Paramètres → Applications → Portail Parents → Notifications), puis revenez ici.</p>';
+    if (st.subscribed && st.permission === 'granted') return '<p><span class="badge lu">Activées sur ce téléphone</span></p><button class="btn secondary" onclick="ppTestPush()">Envoyer une notification de test</button> <button class="btn danger" onclick="ppDisablePush()">Désactiver</button>';
+    return '<button class="btn primary" onclick="ppEnablePush()">🔔 Activer les notifications</button>';
+  }
+  function refreshPushUi(){
+    pushState().then(function(st){
+      var box = document.getElementById('ppPushBox'); if (box) box.innerHTML = pushBoxHtml(st);
+      if (st.subscribed) { var bn = document.querySelector('.pp-push-banner'); if (bn) bn.remove(); }
+    }).catch(function(){});
+  }
+  wrap('logout', function(orig, args){
+    var self = this, finished = false;
+    function finish(){ if (finished) return; finished = true; window.__ppPushToken = null; orig.apply(self, args); }
+    if (!(serverMode() && state.api.sessionToken && pushSupported())) return finish();
+    var tok = state.api.sessionToken;
+    navigator.serviceWorker.getRegistration().then(function(reg){ return reg && reg.pushManager.getSubscription(); }).then(function(sub){
+      return sub ? fetch(apiUrl('/api/push/unsubscribe'), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify({ endpoint: sub.endpoint }) }) : null;
+    }).catch(function(){}).then(finish);
+    setTimeout(finish, 1500);        /* ne jamais bloquer la déconnexion */
+  });
+  if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', function(e){ if (e.data && e.data.type === 'pp-open' && state && state.user && typeof go === 'function') go(e.data.page); });
+  try { var qo = new URLSearchParams(location.search).get('open'); if (qo) window.__ppOpen = qo; } catch (e) {}
+  function pushUi(){
+    try {
+      if (!state || !state.user || !serverMode() || !state.api.sessionToken) return;
+      if (window.__ppOpen && typeof go === 'function') { var pg0 = window.__ppOpen; window.__ppOpen = null; try { history.replaceState(null, '', location.pathname); } catch (e) {} go(pg0); return; }
+      /* réabonnement discret après connexion (même téléphone, autre compte, serveur réinitialisé) */
+      if (pushSupported() && Notification.permission === 'granted' && window.__ppPushToken !== state.api.sessionToken && !window.__ppPushBusy) {
+        window.__ppPushBusy = true;
+        pushRegister().catch(function(){}).then(function(){ window.__ppPushBusy = false; });
+      }
+      var c = document.querySelector('.content'); if (!c) return;
+      var pg = (typeof page !== 'undefined') ? page : '';
+      if (pg === 'profil' && !c.querySelector('.pp-push-panel')) {
+        var pn = document.createElement('div'); pn.className = 'panel pp-push-panel';
+        pn.innerHTML = '<div class="panel-head"><h3>Notifications</h3></div><p class="muted">Recevez une alerte sur ce téléphone à chaque nouveau message, annonce ou absence, même quand l’application est fermée.</p><div id="ppPushBox"><p class="muted">Vérification…</p></div>';
+        c.insertBefore(pn, c.children[Math.min(2, c.children.length)] || null); refreshPushUi();
+      }
+      if (pg === 'home' && !c.querySelector('.pp-push-banner')) {
+        var dis = false; try { dis = localStorage.getItem('pp_push_dismiss') === '1'; } catch (e) {}
+        if (dis) return;
+        if (Date.now() - (window.__ppPushCacheAt || 0) > 6000) {
+          window.__ppPushCacheAt = Date.now();
+          pushState().then(function(st){
+            var cc = document.querySelector('.content');
+            if (!cc || cc.querySelector('.pp-push-banner') || (typeof page !== 'undefined' && page !== 'home')) return;
+            if (st.subscribed || st.permission === 'denied') return;
+            if (!st.supported && !st.needsInstall) return;
+            var bn = document.createElement('div'); bn.className = 'panel pp-push-banner';
+            bn.innerHTML = '<div class="panel-head"><h3>🔔 Ne manquez aucun message</h3></div>' + (st.supported ? '<p class="muted">Activez les notifications pour être prévenu des nouveaux messages et annonces, même application fermée.</p><button class="btn primary" onclick="ppEnablePush()">Activer</button> <button class="btn secondary" onclick="ppDismissPush()">Plus tard</button>' : '<p class="muted">Pour recevoir les notifications sur iPhone : <b>Partager → Sur l’écran d’accueil</b>, puis ouvrez le Portail depuis l’icône.</p><button class="btn secondary" onclick="ppDismissPush()">Compris</button>');
+            cc.insertBefore(bn, cc.firstChild);
+          }).catch(function(){});
+        }
+      }
+    } catch (e) {}
+  }
+  setInterval(pushUi, 1000);
+
+  /* ===== Sauvegardes automatiques du serveur (administrateur) ===== */
+  function fmtDt(x){ try { return new Date(x).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (e) { return String(x); } }
+  function fmtSize(n){ return n > 1048576 ? (n / 1048576).toFixed(1) + ' Mo' : Math.max(1, Math.round(n / 1024)) + ' Ko'; }
+  var KIND = { automatique: 'Automatique', manuelle: 'Manuelle', 'avant-restauration': 'Avant restauration' };
+  window.ppBackupsRefresh = async function(){
+    var box = document.getElementById('ppBackupBox'); if (!box) return;
+    try {
+      var r = await apiRequest('/api/admin/backups'), pu = null; try { pu = await apiRequest('/api/admin/push'); } catch (e) {}
+      var rows = r.backups.map(function(b){
+        return '<div class="item"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><div><b>' + esc(fmtDt(b.createdAt)) + '</b> <span class="badge">' + esc(KIND[b.kind] || b.kind) + '</span><div class="muted">' + esc(b.counts ? (b.counts.parents + ' parents · ' + b.counts.teachers + ' enseignants · ' + b.counts.messages + ' messages') : '') + ' · ' + esc(fmtSize(b.size)) + '</div></div>'
+          + '<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn secondary" onclick="ppDownloadBackup(\'' + esc(b.id) + '\')">⬇ Télécharger</button><button class="btn danger" onclick="ppRestoreBackup(\'' + esc(b.id) + '\',\'' + esc(fmtDt(b.createdAt)) + '\')">Restaurer</button></div></div></div>';
+      }).join('');
+      box.innerHTML = '<p class="muted">Le serveur sauvegarde les données <b>automatiquement toutes les ' + esc(String(r.everyHours)) + ' h</b> (dès qu’il est utilisé) et garde les ' + esc(String(r.keep)) + ' dernières. Dernière : <b>' + esc(r.lastBackupAt ? fmtDt(r.lastBackupAt) : 'aucune') + '</b>.'
+        + (pu ? '<br>Appareils avec notifications activées : <b>' + pu.devices + '</b>' + (pu.byRole && pu.byRole.parent ? ' (dont ' + pu.byRole.parent + ' parent(s))' : '') + '.' : '') + '</p>'
+        + '<button class="btn primary" onclick="ppBackupNow()">Sauvegarder maintenant</button><div style="margin-top:10px">' + (rows || '<div class="empty">Aucune sauvegarde pour le moment.</div>') + '</div>'
+        + '<p class="muted" style="margin-top:8px">Les sauvegardes contiennent les comptes, messages, notes et absences. Les PDF de bulletins sont conservés à part et ne sont pas supprimés lors d’une restauration.</p>';
+    } catch (e) { box.innerHTML = '<p class="muted">Sauvegardes du serveur indisponibles : ' + esc((e && e.message) || 'erreur') + '</p>'; }
+  };
+  window.ppBackupNow = function(){ serverRequest('/api/admin/backups', { method: 'POST', body: '{}' }).then(function(){ toast('Sauvegarde créée'); ppBackupsRefresh(); }).catch(function(e){ toast((e && e.message) || 'Sauvegarde impossible'); }); };
+  window.ppDownloadBackup = async function(id){
+    try {
+      var r = await fetch(apiUrl('/api/admin/backups/' + id), { headers: { Authorization: 'Bearer ' + state.api.sessionToken } });
+      if (!r.ok) throw new Error('Téléchargement impossible');
+      var b = await r.blob(), a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'sauvegarde-portail-' + id + '.json';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+    } catch (e) { toast((e && e.message) || 'Téléchargement impossible'); }
+  };
+  window.ppRestoreBackup = function(id, label){
+    if (!confirm('Restaurer la sauvegarde du ' + label + ' ?\n\nLes données actuelles seront remplacées. Une sauvegarde de sécurité est créée juste avant.')) return;
+    if (!confirm('Dernière confirmation : restaurer maintenant ?')) return;
+    serverRequest('/api/admin/backups/' + id + '/restore', { method: 'POST', body: '{}' }).then(async function(){
+      toast('Sauvegarde restaurée'); try { await syncWithServer(true); } catch (e) {} try { render(); } catch (e) {}
+    }).catch(function(e){ toast((e && e.message) || 'Restauration impossible'); });
+  };
+  function backupUi(){
+    try {
+      if (!state || state.user !== 'admin' || !serverMode() || !state.api.sessionToken) return;
+      if (typeof page === 'undefined' || page !== 'maintenance') return;
+      var c = document.querySelector('.content'); if (!c || c.querySelector('.pp-backup-panel')) return;
+      var pn = document.createElement('div'); pn.className = 'panel pp-backup-panel';
+      pn.innerHTML = '<div class="panel-head"><h3>Sauvegardes automatiques du serveur</h3></div><div id="ppBackupBox"><p class="muted">Chargement…</p></div>';
+      c.insertBefore(pn, c.children[Math.min(2, c.children.length)] || null); ppBackupsRefresh();
+    } catch (e) {}
+  }
+  setInterval(backupUi, 1000);
 })();
 
 </script>
