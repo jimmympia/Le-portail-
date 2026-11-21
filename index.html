@@ -11319,5 +11319,105 @@ html body .login-card:after{content:"Collège Saint-Thomas de Manjo · Diocèse 
 })();
 
 </script>
+<style id="pp-v3-ameliorations">
+:root{--brand-50:#eef8f5;--brand-100:#d5eee6;--brand-200:#a9dccb;--brand-500:#3a9a85;--brand-600:#2d7b6c;--brand-700:#226255;--brand-800:#1a4c43;--brand-900:#133a33;--brand-950:#0b2620;--gold-500:#d89a45;
+--bg:#f7f5f0;--card:#fff;--text:#1d2b28;--muted:#5f6f6b;--border:#e6e1d6;--primary:#2d7b6c;--primary-hover:#226255;--primary-soft:#eef8f5;--accent:#d89a45;--top-bg:#fff;--side-bg:#fff}
+body.dark{--bg:#0f1715;--card:#17221f;--text:#e8f1ee;--muted:#9fb3ad;--border:#2a3a36;--primary:#5cc3a9;--primary-hover:#7fd3bd;--primary-soft:#173a32;--accent:#e8b56a;--top-bg:#17221f;--side-bg:#17221f}
+body{background:var(--bg);color:var(--text)}
+.btn,button.btn{min-height:44px;border-radius:12px}
+.btn.primary{background:var(--primary)!important;border-color:var(--primary)!important;color:#fff!important}
+.btn.primary:hover{background:var(--primary-hover)!important}
+:focus-visible{outline:3px solid var(--accent)!important;outline-offset:2px}
+.nav button.active{background:var(--primary-soft)!important;color:var(--primary)!important;border-left-color:var(--primary)!important}
+.version-tag,.pp-ver{display:none!important}
+.toast{border-radius:12px!important;background:var(--brand-800)!important;color:#fff!important;z-index:100000!important}
+.item .btn.danger{background:transparent!important;color:#b42318!important;border:1px solid #f1c8c3!important}
+body.dark .item .btn.danger{color:#ff9b8f!important;border-color:#5a2a26!important}
+@media (max-width:900px){.nav{overflow-x:auto;scrollbar-width:none}.nav button{white-space:nowrap!important;flex:0 0 auto!important;text-overflow:clip!important}.nav .logout{display:none!important}}
+.ppm-back{position:fixed;inset:0;background:rgba(10,25,22,.55);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px}
+.ppm{background:#fff;color:#1d2b28;border-radius:18px;padding:22px;width:100%;max-width:420px;box-shadow:0 20px 50px rgba(0,0,0,.25);font-family:system-ui,sans-serif}
+.ppm h2{margin:0 0 8px;font-size:1.2rem}.ppm p{color:#5f6f6b;margin:0 0 14px;line-height:1.45}
+.ppm label{display:block;font-weight:600;margin-bottom:6px}
+.ppm input{width:100%;box-sizing:border-box;min-height:44px;padding:10px 12px;border:1px solid #d9d3c6;border-radius:10px;background:#f7f5f0;color:#1d2b28;font-size:16px}
+.ppm .err{color:#b42318;font-size:.9rem;min-height:1.2em;margin:6px 0 0}
+.ppm .acts{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.ppm .acts button{min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #d9d3c6;background:#fff;color:#1d2b28;font-weight:600;cursor:pointer}
+.ppm .acts .ok{background:#2d7b6c;border-color:#2d7b6c;color:#fff}.ppm .acts .ok.danger{background:#b42318;border-color:#b42318}
+.ppm-back.dark .ppm{background:#17221f;color:#e8f1ee}.ppm-back.dark .ppm p{color:#9fb3ad}.ppm-back.dark .ppm input{background:#0f1715!important;color:#e8f1ee!important;border-color:#2a3a36!important}.ppm-back.dark .ppm .acts button:not(.ok){background:#17221f;color:#e8f1ee;border-color:#2a3a36}
+.pp-logout-profile{margin-top:16px}
+</style>
+<script id="pp-v3-script">
+(function(){
+function norm(s){return String(s||"").trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();}
+var cur=null;
+function modal(o){return new Promise(function(res){
+ var prev=document.activeElement,b=document.createElement("div");b.className="ppm-back"+(document.body.classList.contains("dark")?" dark":"");
+ b.innerHTML='<div class="ppm" role="dialog" aria-modal="true" aria-labelledby="ppmT"><h2 id="ppmT"></h2><p class="msg"></p>'+(o.label?'<label for="ppmI"></label><input id="ppmI" type="text" autocomplete="off"><div class="err" role="alert"></div>':'')+'<div class="acts">'+(o.noCancel?'':'<button type="button" class="no">Annuler</button>')+'<button type="button" class="ok'+(o.danger?' danger':'')+'"></button></div></div>';
+ b.querySelector("h2").textContent=o.title;var m=b.querySelector(".msg");if(o.message)m.textContent=o.message;else m.remove();
+ b.querySelector(".ok").textContent=o.ok||"Enregistrer";
+ var inp=b.querySelector("input");if(inp){b.querySelector("label").textContent=o.label;inp.value=o.value||"";inp.placeholder=o.placeholder||"";}
+ function close(v){cur=null;b.remove();document.removeEventListener("keydown",k,true);try{prev&&prev.focus()}catch(e){}setTimeout(function(){res(v)},0);}
+ function ok(){if(!inp)return close(true);var v=inp.value.trim().replace(/\s+/g," "),e=o.validate?o.validate(v):"";if(e){b.querySelector(".err").textContent=e;inp.focus();return;}close(v);}
+ function k(e){if(e.key==="Escape"){e.stopPropagation();close(null);}else if(e.key==="Enter"&&inp&&document.activeElement===inp){e.preventDefault();ok();}}
+ b.querySelector(".ok").onclick=ok;var n=b.querySelector(".no");if(n)n.onclick=function(){close(null)};
+ b.addEventListener("click",function(e){if(e.target===b)close(null)});document.addEventListener("keydown",k,true);
+ cur=b;document.documentElement.appendChild(b);setTimeout(function(){(inp||b.querySelector(".ok")).focus();if(inp)inp.select();},30);});}
+setInterval(function(){if(cur&&!cur.isConnected)document.documentElement.appendChild(cur);},200);
+window.ppModal=modal;
+function info(t,m){return modal({title:t,message:m,ok:"Compris",noCancel:true});}
+function dirty(){try{if(typeof markLocalChange==="function")markLocalChange()}catch(e){}}
+function log(a,d){try{if(typeof logActivity==="function")logActivity(a,d)}catch(e){}}
+function classUse(c){var n=0;(state.parents||[]).forEach(function(p){if(p.className===c)n++;(p.children||[]).forEach(function(x){if(x.className===c)n++})});
+ ["teachers","students","grades","absences","bulletins"].forEach(function(k){(state[k]||[]).forEach(function(x){if(x&&(x.className===c||x.classe===c||(Array.isArray(x.classes)&&x.classes.indexOf(c)>-1)))n++})});return n;}
+function vName(list,skip,label){return function(v){if(!v)return "Saisissez le nom de la "+label+".";if(v.length<2)return "Le nom doit contenir au moins 2 caractères.";if(v.length>40)return "40 caractères maximum.";
+ if(list.some(function(s,i){return i!==skip&&norm(s)===norm(v)}))return "Cette "+label+" existe déjà.";return "";};}
+window.addClassPrompt=function(){if(!Array.isArray(state.classes))state.classes=[];modal({title:"Ajouter une classe",label:"Nom de la classe",placeholder:"Ex. 1ère A4",ok:"Ajouter",validate:vName(state.classes,-1,"classe")}).then(function(v){if(v==null)return;state.classes.push(v);dirty();save();log("Classe ajoutée",v);toast("Classe « "+v+" » ajoutée");go("classes");});};
+window.renameClass=function(i){var old=state.classes[i];if(old==null)return;modal({title:"Renommer la classe",label:"Nouveau nom",value:old,validate:vName(state.classes,i,"classe")}).then(function(v){if(v==null||v===old)return;state.classes[i]=v;
+ function f(x){if(!x)return;if(x.className===old)x.className=v;if(x.classe===old)x.classe=v;if(Array.isArray(x.classes))x.classes=x.classes.map(function(c){return c===old?v:c});}
+ (state.parents||[]).forEach(function(p){f(p);(p.children||[]).forEach(f);if(p.children&&p.children[0]){p.student=p.children[0].name;p.className=p.children[0].className;}});
+ ["teachers","students","grades","absences","bulletins","annonces"].forEach(function(k){(state[k]||[]).forEach(f)});
+ if(state.classPrincipals&&state.classPrincipals[old]!=null){state.classPrincipals[v]=state.classPrincipals[old];delete state.classPrincipals[old];}
+ dirty();save();log("Classe renommée",old+" → "+v);toast("Classe renommée");go("classes");});};
+window.deleteClass=function(i){var c=state.classes[i];if(c==null)return;var n=classUse(c);
+ if(n>0)return info("Suppression impossible","La classe « "+c+" » est encore utilisée ("+n+" fiche(s) : parents, élèves, notes…). Déplacez ou renommez ces fiches avant de la supprimer.");
+ modal({title:"Supprimer la classe ?",message:"La classe « "+c+" » sera définitivement supprimée.",ok:"Supprimer",danger:true}).then(function(y){if(!y)return;state.classes.splice(i,1);dirty();save();log("Classe supprimée",c);toast("Classe supprimée");go("classes");});};
+function adminOk(){if(typeof isAdmin==="function"&&!isAdmin()){toast("Accès administrateur requis");return false;}if(!Array.isArray(state.subjects))state.subjects=[];return true;}
+window.addSubjectPrompt=function(){if(!adminOk())return;modal({title:"Ajouter une matière",label:"Nom de la matière",placeholder:"Ex. Mathématiques",ok:"Ajouter",validate:vName(state.subjects,-1,"matière")}).then(function(v){if(v==null)return;state.subjects.push(v);dirty();save();log("Matière ajoutée",v);toast("Matière « "+v+" » ajoutée");go("subjects");});};
+window.addSubjectFromForm=function(){if(!adminOk())return;var el=document.getElementById("newSubjectName"),v=el?el.value.trim():"",e=vName(state.subjects,-1,"matière")(v);if(e)return toast(e);state.subjects.push(v);dirty();save();toast("Matière « "+v+" » ajoutée");go("subjects");};
+window.renameSubject=function(i){if(!adminOk())return;var old=state.subjects[i];if(old==null)return;modal({title:"Modifier la matière",label:"Nouveau nom",value:old,validate:vName(state.subjects,i,"matière")}).then(function(v){if(v==null||v===old)return;state.subjects[i]=v;
+ (state.teachers||[]).forEach(function(t){if(t&&Array.isArray(t.subjects))t.subjects=t.subjects.map(function(s){return s===old?v:s})});
+ (state.grades||[]).forEach(function(g){if(g&&g.subject===old)g.subject=v});dirty();save();log("Matière renommée",old+" → "+v);toast("Matière renommée");go("subjects");});};
+window.deleteSubject=function(i){if(!adminOk())return;var s=state.subjects[i];if(s==null)return;var g=(state.grades||[]).filter(function(x){return x&&x.subject===s}).length;
+ if(g)return info("Suppression impossible","La matière « "+s+" » contient "+g+" note(s). Elle est conservée pour ne pas perdre l'historique des bulletins.");
+ modal({title:"Supprimer la matière ?",message:"« "+s+" » sera retirée de la liste et des fiches enseignants.",ok:"Supprimer",danger:true}).then(function(y){if(!y)return;state.subjects.splice(i,1);(state.teachers||[]).forEach(function(t){if(t&&Array.isArray(t.subjects))t.subjects=t.subjects.filter(function(x){return x!==s})});dirty();save();log("Matière supprimée",s);toast("Matière supprimée");go("subjects");});};
+window.requestNotifPermission=function(){if(!("Notification" in window))return toast("Ce navigateur ne gère pas les notifications.");
+ if(Notification.permission==="granted")return toast("Les notifications sont déjà activées.");
+ if(Notification.permission==="denied")return toast("Notifications bloquées : autorisez-les dans les réglages du navigateur.");
+ Notification.requestPermission().then(function(p){toast(p==="granted"?"Notifications activées":"Notifications non autorisées");});};
+var _push=window.showPush;
+window.showPush=function(t,b,tag){if(!("Notification" in window)){toast((t||"Notification")+" — "+(b||""));return;}
+ if(Notification.permission!=="granted"){toast("Activez d'abord les notifications pour recevoir ce test.");return;}
+ try{_push(t,b,tag);}catch(e){toast(t+" — "+(b||""));}};
+window.saveApiSettings=function(){if(typeof isAdmin==="function"&&!isAdmin())return toast("Accès administrateur requis");
+ var base=((document.getElementById("apiBaseUrl")||{}).value||"").trim().replace(/\/+$/,""),school=((document.getElementById("apiSchoolId")||{}).value||"").trim();
+ if(base){var u;try{u=new URL(base)}catch(e){return toast("Adresse du serveur invalide.");}
+  if(!/^https?:$/.test(u.protocol))return toast("L'adresse doit commencer par https://");
+  if(u.username||u.password)return toast("N'incluez pas d'identifiant ou de mot de passe dans l'adresse.");
+  if(!school)return toast("Indiquez l'identifiant de l'école.");
+  if(!/^[a-z0-9-]{2,40}$/i.test(school))return toast("Identifiant d'école : lettres, chiffres et tirets uniquement.");}
+ state.api=state.api||{};state.api.baseUrl=base;state.api.schoolId=school||"cst-manjo";state.api.enabled=!!base;state.api.lastSyncStatus=base?"configured":"local";
+ try{ensureApiConfig()}catch(e){}save();toast(base?"Configuration enregistrée":"Mode local (sans serveur) enregistré");go("profil");};
+function tidy(){
+ document.querySelectorAll(".version-tag,.pp-ver").forEach(function(e){e.remove()});
+ document.querySelectorAll(".gesco40-muted").forEach(function(e){if(/Centre de contrôle mobile/.test(e.textContent))e.textContent="Vue d'ensemble des échanges avec les familles.";});
+ document.querySelectorAll("body span,body div,body small,body p").forEach(function(e){if(e.children.length===0&&/^Sync : /.test(e.textContent)){e.textContent=e.textContent.replace(/^Sync : En attente/,"Synchronisation en attente").replace(/^Sync : /,"Synchronisation : ");}});
+ if(/v\d+\.\d+/.test(document.title))document.title=document.title.replace(/\s*[-–·]?\s*v\d+(\.\d+)+/g,"");
+ var prof=(typeof page!=="undefined"&&page==="profil")?document.querySelector("section.content"):null;
+ if(prof&&!prof.querySelector(".pp-logout-profile")&&typeof logout==="function"){var d=document.createElement("div");d.className="panel pp-logout-profile";d.innerHTML='<h3>Session</h3><p class="muted">Fermez votre session sur cet appareil.</p><button type="button" class="btn danger">Se déconnecter</button>';d.querySelector("button").onclick=function(){modal({title:"Se déconnecter ?",ok:"Se déconnecter",danger:true}).then(function(y){if(y)logout()})};prof.appendChild(d);}
+}
+var t;new MutationObserver(function(){clearTimeout(t);t=setTimeout(tidy,80)}).observe(document.body,{childList:true,subtree:true});
+setTimeout(tidy,300);
+})();
+</script>
 </body>
 </html>
