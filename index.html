@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Portail Parents">
 <script>if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
-<title>Portail Parents — V2.3.131</title>
+<title>Portail Parents — V2.3.130</title>
 <style>
 *{box-sizing:border-box}
 :root{
@@ -604,9 +604,9 @@ function syncStatusLabel(){
   return state.api.enabled ? "Configuré" : "Local";
 }
 
-var PP_SYNC_ARRAYS = ["teachers","parents","classes","subjects","sequences","templates","events","annonces","students","staff","profileRequests","messages","bulletins","bulletinRequests","bulletinHistory","grades","absences"];
+var PP_SYNC_ARRAYS = ["teachers","parents","classes","subjects","sequences","templates","events","annonces","students","messages","bulletins","bulletinRequests","bulletinHistory","grades","absences"];
 var PP_SYNC_OBJECTS = ["classPrincipals","supervisor","profiles","smsSettings","whatsappSettings","school"];
-var PP_SHARED = ["messages","bulletins","bulletinRequests","bulletinHistory","grades","absences","annonces","profileRequests"];
+var PP_SHARED = ["messages","bulletins","bulletinRequests","bulletinHistory","grades","absences"];
 function syncPayload(){
   var o = {};
   PP_SYNC_ARRAYS.forEach(function(k){ if (Array.isArray(state[k])) o[k] = state[k]; });
@@ -2671,7 +2671,7 @@ function openConversation(key){
     var cls = mine ? "message sent" : "message received";
     var attachHtml = "";
     if (m.attach) {
-      var hasData = !!(m.attach.data || m.attach.fileId);
+      var hasData = !!m.attach.data;
       attachHtml = '<div class="attach-chip">📎 ' + esc(m.attach.name) + ' (' + esc(m.attach.size) + ')'
         + (hasData
           ? ' <a href="#" onclick="event.preventDefault();previewAttachByMsgId(' + m.id + ')">Ouvrir</a>'
@@ -4606,7 +4606,7 @@ function suiviAbsences(child, admin){
         + '<b>Justificatif parent :</b> ' + esc(a.justification.text)
         + (a.justification.submittedAt ? ' <span class="muted">(' + esc(a.justification.submittedAt) + ')</span>' : '')
         + (a.justification.attach ? '<div class="attach-chip" style="margin-top:6px">📎 ' + esc(a.justification.attach.name)
-          + ((a.justification.attach.data || a.justification.attach.fileId) ? ' <a href="#" onclick="event.preventDefault();downloadAttach(state.absences.find(function(x){return x.id===' + a.id + '}).justification.attach)">Télécharger</a>' : '')
+          + (a.justification.attach.data ? ' <a href="#" onclick="event.preventDefault();downloadAttach(state.absences.find(function(x){return x.id===' + a.id + '}).justification.attach)">Télécharger</a>' : '')
           + '</div>' : '')
         + '</div>';
     }
@@ -7129,7 +7129,7 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
     }).slice().sort(function(a,b){if(!!a.pinned!==!!b.pinned)return a.pinned?-1:1;return (b.id||0)-(a.id||0);});
     return '<div class="panel-head"><div><h1>Annonces</h1><p class="muted">Les communications générales sont publiées par l’administration. Les parents voient les annonces générales et celles des classes de leurs enfants.</p></div>'+(isAdmin()?'<button class="btn primary" onclick="newAnnonce()">Nouvelle annonce</button>':'')+'</div><div class="list">'+visible.map(function(a){return '<div class="panel" id="annonce-'+a.id+'" style="'+(a.pinned?'border-color:var(--primary);border-width:2px':'')+'"><div class="item-head"><h3>'+(a.pinned?'📌 ':'')+esc(a.title)+'</h3><span class="muted">'+esc(a.date)+(a.target?' · '+esc(a.target):'')+'</span></div><p>'+esc(a.body)+'</p><button class="btn secondary" onclick="printAnnonce('+a.id+')">🖨 Imprimer / PDF</button>'+(isAdmin()?'<button class="btn secondary" onclick="togglePinAnnonce('+a.id+')">'+(a.pinned?'Désépingler':'Épingler')+'</button> <button class="btn danger" onclick="deleteAnnonce('+a.id+')">Supprimer</button>':'')+'</div>';}).join('')||empty()+'</div>';
   };
-  window.saveAnnonce=function(){if(!requireSession()||!(isAdmin()||(window.ppCanPublish&&window.ppCanPublish())))return toast('Seules l’administration et la direction peuvent publier les communications générales.');var t=document.getElementById('at').value.trim(),b=document.getElementById('ab').value.trim(),target=document.getElementById('atarget').value;if(!t||!b)return toast('Complétez les champs');state.annonces=state.annonces||[];state.annonces.push({id:Date.now(),title:t,body:b,date:todayStr(),target:target,pinned:false});try{logActivity('Nouvelle annonce',t+' → '+target);pushNotif('Nouvelle annonce : '+t,'annonce','annonce',Date.now());}catch(e){}save();toast('Annonce publiée');go('annonces');};
+  window.saveAnnonce=function(){if(!requireSession()||!isAdmin())return toast('Seule l’administration peut publier les communications générales.');var t=document.getElementById('at').value.trim(),b=document.getElementById('ab').value.trim(),target=document.getElementById('atarget').value;if(!t||!b)return toast('Complétez les champs');state.annonces=state.annonces||[];state.annonces.push({id:Date.now(),title:t,body:b,date:todayStr(),target:target,pinned:false});try{logActivity('Nouvelle annonce',t+' → '+target);pushNotif('Nouvelle annonce : '+t,'annonce','annonce',Date.now());}catch(e){}save();toast('Annonce publiée');go('annonces');};
   var oldShell=window.shell;
   if(typeof oldShell==='function')window.shell=function(){var html=oldShell();return html.replace('CST Manjo','Portail Parents').replace(/v2\.3\.68/g,'v2.3.81').replace(/v2\.3\.79/g,'v2.3.81');};
 })();
@@ -7218,17 +7218,16 @@ if(typeof window.render==='function'){var original=window.render;window.render=f
     if (ents.length) h += '<p class="muted" style="margin-top:8px">' + done + " classe(s) sur " + ents.length + " ont reçu leur bulletin pour cette séquence.</p>";
     return h + '</div>';
   }
-  window.ppClassBulletinPanel = panel;
   window.ppBulletinRoute = function(){
     var h = typeof window.bulletinView === "function" ? window.bulletinView() : "";
-    if (window.ppCanDistribute && window.ppCanDistribute()) {
+    if (typeof isAdmin === "function" && isAdmin()) {
       var mk = '<div class="panel"><h3>Demandes des parents en attente', i = h.indexOf(mk);
       h = i === -1 ? h + panel() : h.slice(0, i) + panel() + h.slice(i);
     }
     return h;
   };
   window.portalImportClassBulletin = function(input){
-    if (!requireSession() || !(window.ppCanDistribute && window.ppCanDistribute())) return toast("Import réservé à l’administration");
+    if (!requireSession() || !isAdmin()) return toast("Import réservé à l’administration");
     var file = input.files && input.files[0], cls = input.getAttribute("data-class"), seq = window.ppBcSeq || "Séquence 1";
     if (!file) return;
     if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) return toast("Le fichier doit être un PDF");
@@ -9740,7 +9739,7 @@ window.__ppServerReady = (function(){
       if (!state.api || typeof state.api !== 'object') state.api = {};
       var base = originBase();
       if (!base) return;
-      if (window.__ppServerOk !== true) return;     /* 2.3.131 : jamais d'activation sans avoir vérifié le serveur */
+      if (window.__ppServerOk !== true) return;     /* 2.3.130 : jamais d'activation sans avoir vérifié le serveur */
       // Si déjà configuré manuellement vers une autre URL, ne pas écraser
       var current = (state.api.baseUrl || '').replace(/\/$/, '');
       if (current && current !== base.replace(/\/$/, '') && current.indexOf(location.hostname) === -1) {
@@ -10764,7 +10763,7 @@ html body .login-card:after{content:"Collège Saint-Thomas de Manjo · Diocèse 
 <script id="pp-fixes-125">
 (function(){
   'use strict';
-  window.GESCO_VERSION = '2.3.131';
+  window.GESCO_VERSION = '2.3.130';
   function nz(x){ return String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
   function pk(s){ var d = String(s == null ? '' : s).replace(/\D/g, ''); return d.length >= 8 ? d.slice(-9) : ''; }
   function byId(i){ return document.getElementById(i); }
@@ -10886,7 +10885,7 @@ html body .login-card:after{content:"Collège Saint-Thomas de Manjo · Diocèse 
       var tw = document.createTreeWalker(c, NodeFilter.SHOW_TEXT, null), tn, todo = [];
       while ((tn = tw.nextNode())) { if (re.test(tn.nodeValue) && !/^(SCRIPT|STYLE|TEXTAREA|PRE|CODE|OPTION)$/.test(tn.parentNode.nodeName)) todo.push(tn); }
       todo.forEach(function(t){ t.nodeValue = t.nodeValue.replace(reg, '$3/$2/$1'); });
-      if (isSup) { var w2 = document.createTreeWalker(c, NodeFilter.SHOW_TEXT, null), n2; while ((n2 = w2.nextNode())) { if (n2.nodeValue.indexOf('Compte Parent') !== -1) n2.nodeValue = n2.nodeValue.replace('Compte Parent', 'Compte ' + ((state.supervisor && state.supervisor.label) || 'Surveillant général')); } }
+      if (isSup) { var w2 = document.createTreeWalker(c, NodeFilter.SHOW_TEXT, null), n2; while ((n2 = w2.nextNode())) { if (n2.nodeValue.indexOf('Compte Parent') !== -1) n2.nodeValue = n2.nodeValue.replace('Compte Parent', 'Compte Surveillant général'); } }
     } catch (e) {}
   }
   var base = window.render;
@@ -11317,286 +11316,108 @@ html body .login-card:after{content:"Collège Saint-Thomas de Manjo · Diocèse 
     } catch (e) {}
   }
   setInterval(backupUi, 1000);
-
-  /* ===== Pièces jointes stockées sur le serveur ===== */
-  function fileToDataUrl(file){ return new Promise(function(res, rej){ var r = new FileReader(); r.onload = function(){ res(String(r.result || '')); }; r.onerror = function(){ rej(new Error('Lecture du fichier impossible')); }; r.readAsDataURL(file); }); }
-  function shrinkImage(dataUrl){
-    return new Promise(function(res){
-      var img = new Image();
-      img.onload = function(){
-        var k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement('canvas');
-        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-        var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
-        try { res(c.toDataURL('image/jpeg', 0.8)); } catch (e) { res(dataUrl); }
-      };
-      img.onerror = function(){ res(dataUrl); };
-      img.src = dataUrl;
-    });
-  }
-  function abortSend(){
-    [].slice.call(document.querySelectorAll('button')).forEach(function(b){ if (/^Envoi/.test((b.textContent || '').trim())) { b.disabled = false; b.textContent = 'Réessayer'; } });
-    return new Promise(function(){});                 /* l'envoi n'a pas lieu : jamais de message envoyé sans son fichier */
-  }
-  wrap('readAttachment', function(orig, args){
-    if (!serverMode() || !state.api.sessionToken) return orig.apply(this, args);
-    var input = args[0], f = input && input.files && input.files[0];
-    if (!f) return Promise.resolve(null);
-    if (f.size > 12 * 1024 * 1024) { toast('Fichier trop volumineux (12 Mo maximum)'); return abortSend(); }
-    return (async function(){
-      try {
-        var data = await fileToDataUrl(f), name = f.name || 'fichier', type = f.type || 'application/octet-stream';
-        if (/^image\//i.test(type) && (f.size > 700 * 1024 || !/^image\/(jpeg|png|webp)$/i.test(type))) { data = await shrinkImage(data); type = 'image/jpeg'; name = name.replace(/\.[^.]+$/, '') + '.jpg'; }
-        var bytes = Math.round((data.length - data.indexOf(',') - 1) * 3 / 4);
-        if (bytes > 6 * 1024 * 1024) { toast('Fichier trop volumineux (6 Mo maximum)'); return abortSend(); }
-        toast('Envoi de la pièce jointe…');
-        var up;
-        try { up = await apiRequest('/api/attachments', { method: 'POST', body: JSON.stringify({ name: name, data: data }) }); }
-        catch (e1) { up = await apiRequest('/api/attachments', { method: 'POST', body: JSON.stringify({ name: name, data: data }) }); }
-        return { name: up.name || name, size: typeof formatSize === 'function' ? formatSize(up.size) : String(up.size), type: up.mime || type, fileId: up.id };
-      } catch (e) { toast((e && e.message) || 'Envoi de la pièce jointe impossible'); return abortSend(); }
-    })();
-  });
-  async function fetchAttachBlob(a){
-    var r = await fetch(apiUrl('/api/attachments/' + a.fileId), { headers: { Authorization: 'Bearer ' + (state.api.sessionToken || '') } });
-    if (!r.ok) throw new Error(r.status === 404 ? 'Fichier introuvable ou accès refusé' : r.status === 401 ? 'Session expirée : reconnectez-vous' : 'Téléchargement impossible');
-    return r.blob();
-  }
-  wrap('downloadAttach', function(orig, args){
-    var a = args[0];
-    if (a && a.fileId && !a.data) {
-      fetchAttachBlob(a).then(function(b){ var u = URL.createObjectURL(b), l = document.createElement('a'); l.href = u; l.download = a.name || 'piece-jointe'; document.body.appendChild(l); l.click(); l.remove(); setTimeout(function(){ URL.revokeObjectURL(u); }, 5000); })
-        .catch(function(e){ toast((e && e.message) || 'Téléchargement impossible'); });
-      return;
-    }
-    return orig.apply(this, args);
-  });
-  wrap('previewAttachByMsgId', function(orig, args){
-    var m = (state.messages || []).filter(function(x){ return String(x.id) === String(args[0]); })[0], a = m && m.attach;
-    if (a && a.fileId && !a.data) {
-      var win = window.open('', '_blank');
-      fetchAttachBlob(a).then(function(b){ var u = URL.createObjectURL(b); if (win) win.location.href = u; else window.downloadAttach(a); })
-        .catch(function(e){ if (win) win.close(); toast((e && e.message) || 'Aperçu impossible'); });
-      return;
-    }
-    return orig.apply(this, args);
-  });
-
-  /* ===== Personnel de direction et comptabilité ===== */
-  var STAFF = {
-    surveillant: { label: 'Surveillant général', vie: 'write', bulletins: false, annonces: false },
-    vice: { label: 'Vice-principal', vie: 'read', bulletins: true, annonces: true },
-    prefet: { label: 'Préfet des études', vie: 'read', bulletins: true, annonces: true },
-    comptable: { label: 'Comptable', vie: false, bulletins: false, annonces: true }
-  };
-  function isSupRole(){ return typeof isSupervisor === 'function' && isSupervisor(); }
-  function staffKey(){ var s = state.supervisor || {}, u = (state.api && state.api.serverUser) || {}; return STAFF[s.staffRole] ? s.staffRole : (STAFF[u.staffRole] ? u.staffRole : 'surveillant'); }
-  function staffCaps(){ return STAFF[staffKey()]; }
-  window.ppCanPublish = function(){ return (typeof isAdmin === 'function' && isAdmin()) || (isSupRole() && staffCaps().annonces); };
-  window.ppCanDistribute = function(){ return (typeof isAdmin === 'function' && isAdmin()) || (isSupRole() && staffCaps().bulletins); };
-  wrap('myLabel', function(orig, args){ if (isSupRole() && serverMode()) { var s = state.supervisor || {}, u = (state.api && state.api.serverUser) || {}; return s.label || u.label || STAFF[staffKey()].label; } return orig.apply(this, args); });
-  if (!Array.isArray(state.staff)) state.staff = [];
-  if (!Array.isArray(state.profileRequests)) state.profileRequests = [];
-  var priorAccess3 = window.canAccessPage;
-  window.canAccessPage = function(p){
-    if (p === 'staff') return typeof isAdmin === 'function' && isAdmin();
-    if (isSupRole()) { var c = staffCaps(); if (p === 'viescolaire') return !!c.vie; if (p === 'bulletins') return !!c.bulletins; }
-    return typeof priorAccess3 === 'function' ? priorAccess3(p) : true;
-  };
-  function staffLabelOf(k){ return (STAFF[k] || STAFF.vice).label; }
-  function staffPageHtml(){
-    var L = (state.staff || []).slice().sort(function(a, b){ return nz(a.name) < nz(b.name) ? -1 : 1; });
-    var rows = L.map(function(x){
-      return '<div class="item"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div style="min-width:0"><b>' + esc(x.name) + '</b> <span class="badge">' + esc(staffLabelOf(x.role)) + '</span>' + (x.active === false ? ' <span class="badge">Désactivé</span>' : '') + '<div class="muted">' + esc(x.phone || 'Téléphone non renseigné') + '</div></div>'
-        + '<div style="display:flex;gap:6px;flex-wrap:wrap">' + callAnchor(x.phone, '📞 Appeler') + '<button class="btn secondary" onclick="ppStaffForm(' + Number(x.id) + ')">Modifier</button>' + (serverMode() ? '<button class="btn secondary" onclick="ppResetAccess(\'staff\',' + Number(x.id) + ')">Réinitialiser l’accès</button>' : '') + '<button class="btn danger" onclick="ppStaffDelete(' + Number(x.id) + ')">Supprimer</button></div></div></div>';
-    }).join('');
-    return '<h1>Direction et personnel</h1><p class="muted">Créez les comptes de la direction pédagogique et de la comptabilité. Chaque personne se connecte avec son <b>nom</b> et choisit son code à 4 chiffres à la première connexion (son numéro de téléphone sert à vérifier son identité).</p>'
-      + '<div class="panel"><div class="panel-head"><h3>Droits de chaque fonction</h3></div><ul class="muted" style="margin:0;padding-left:18px;line-height:1.6"><li><b>Vice-principal / Préfet des études</b> : contacts et appels des parents, messages, annonces, distribution des bulletins de classe, lecture des absences et des notes.</li><li><b>Comptable</b> : contacts et appels des parents, messages, annonces.</li><li>Ils n’ont accès ni à la gestion des comptes, ni aux sauvegardes, ni aux réglages.</li></ul></div>'
-      + '<div class="panel"><div class="panel-head"><h3>Comptes (' + L.length + ')</h3><button class="btn primary" onclick="ppStaffForm()">+ Ajouter</button></div>' + (rows || '<div class="empty">Aucun compte pour le moment.</div>') + '</div>';
-  }
-  window.ppStaffForm = function(id){
-    var x = id != null ? (state.staff || []).filter(function(s){ return s.id === id; })[0] : null;
-    if (document.getElementById('ppStaffOv')) return;
-    var o = document.createElement('div'); o.id = 'ppStaffOv';
-    o.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:100000;background:rgba(15,23,42,.7);display:flex;align-items:center;justify-content:center;padding:16px';
-    var opts = ['vice', 'prefet', 'comptable'].map(function(k){ return '<option value="' + k + '"' + (x && x.role === k ? ' selected' : '') + '>' + STAFF[k].label + '</option>'; }).join('');
-    o.innerHTML = '<div class="panel" style="width:min(440px,100%);max-height:90vh;overflow:auto;margin:0"><h2>' + (x ? 'Modifier' : 'Nouveau compte') + '</h2>'
-      + '<div class="field"><label>Nom complet</label><input id="sfName" value="' + esc(x ? x.name : '') + '" placeholder="Ex. Mme Ngono Marie"></div>'
-      + '<div class="field"><label>Fonction</label><select id="sfRole">' + opts + '</select></div>'
-      + '<div class="field"><label>Téléphone (vérification à la première connexion)</label><input id="sfPhone" type="tel" value="' + esc(x ? x.phone || '' : '') + '" placeholder="+237 6 xx xx xx xx"></div>'
-      + '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" id="sfOk">Enregistrer</button><button class="btn secondary" id="sfNo">Annuler</button></div></div>';
-    document.body.appendChild(o);
-    byId('sfNo').onclick = function(){ o.remove(); };
-    byId('sfOk').onclick = function(){
-      var name = byId('sfName').value.trim(), role = byId('sfRole').value, phone = byId('sfPhone').value.trim(), k = pk(phone);
-      if (name.length < 3) return toast('Saisissez le nom complet');
-      if (!k) return toast('Saisissez un numéro de téléphone valide');
-      var dup = (state.staff || []).some(function(s){ return (!x || s.id !== x.id) && pk(s.phone) === k; }) || (state.teachers || []).some(function(t){ return pk(t.phone) === k; });
-      if (dup) return toast('Ce numéro est déjà utilisé par un autre membre du personnel');
-      if ((state.staff || []).some(function(s){ return (!x || s.id !== x.id) && nz(s.name) === nz(name); })) return toast('Ce nom existe déjà');
-      if (x) { x.name = name; x.role = role; x.phone = phone; }
-      else (state.staff = state.staff || []).push({ id: Date.now(), name: name, role: role, phone: phone, active: true });
-      if (typeof markLocalChange === 'function') markLocalChange();
-      save(true); o.remove(); render();
-      toast(x ? 'Compte modifié' : 'Compte créé : la personne choisira son code à sa première connexion');
-      if (serverMode() && state.api.sessionToken) syncWithServer(true);
-    };
-    setTimeout(function(){ if (byId('sfName')) byId('sfName').focus(); }, 50);
-  };
-  window.ppStaffDelete = function(id){
-    var x = (state.staff || []).filter(function(s){ return s.id === id; })[0]; if (!x) return;
-    if (!confirm('Supprimer le compte de ' + x.name + ' ?\n\nCette personne ne pourra plus se connecter.')) return;
-    state.staff = state.staff.filter(function(s){ return s.id !== id; });
-    if (typeof markLocalChange === 'function') markLocalChange();
-    save(true); render(); toast('Compte supprimé');
-    if (serverMode() && state.api.sessionToken) syncWithServer(true);
-  };
-  /* vue « Bulletins » du personnel autorisé : distribution aux professeurs principaux */
-  function staffBulletinsHtml(){
-    var list = (state.bulletins || []).filter(function(b){ return b && b.kind === 'class'; }).sort(function(a, b){ return String(b.date || '') < String(a.date || '') ? -1 : 1; });
-    var panel = typeof window.ppClassBulletinPanel === 'function' ? window.ppClassBulletinPanel() : '';
-    var items = list.map(function(b){ return '<div class="item"><b>' + esc(b.className) + ' — ' + esc(b.sequence) + '</b><div class="muted">Envoyé le ' + esc(b.date || '') + ' · ' + esc(b.name || 'PDF') + '</div></div>'; }).join('');
-    return '<h1>Bulletins de classe</h1><p class="muted">Importez le bulletin officiel de chaque classe : il est remis directement au professeur principal.</p>' + panel + '<div class="panel"><div class="panel-head"><h3>Déjà envoyés</h3></div>' + (items || '<div class="empty">Aucun bulletin envoyé.</div>') + '</div>';
-  }
-  var priorView3 = window.view;
-  window.view = function(){
-    var pg = (typeof page !== 'undefined') ? page : '';
-    if (pg === 'staff' && typeof isAdmin === 'function' && isAdmin()) return staffPageHtml();
-    if (pg === 'bulletins' && isSupRole() && staffCaps().bulletins) return staffBulletinsHtml();
-    return typeof priorView3 === 'function' ? priorView3.apply(this, arguments) : '';
-  };
-  function staffUi(){
-    try {
-      if (!state || !state.user) return;
-      var nav = document.querySelector('.nav'), c = document.querySelector('.content'), pg = (typeof page !== 'undefined') ? page : '';
-      if (nav && typeof isAdmin === 'function' && isAdmin() && !nav.querySelector('[data-page="staff"]')) {
-        var b = document.createElement('button'); b.type = 'button'; b.setAttribute('data-page', 'staff'); b.setAttribute('aria-label', 'Direction et personnel'); b.className = pg === 'staff' ? 'active' : ''; b.textContent = 'Direction'; b.onclick = function(){ go('staff'); };
-        var after = nav.querySelector('[data-page="supervisorAdmin"]') || nav.querySelector('[data-page="teachers"]'); if (after && after.nextSibling) nav.insertBefore(b, after.nextSibling); else nav.appendChild(b);
-      }
-      if (nav && isSupRole()) {
-        var cp = staffCaps();
-        if (!cp.vie) nav.querySelectorAll('[data-page="viescolaire"]').forEach(function(e){ e.remove(); });
-        if (cp.bulletins && !nav.querySelector('[data-page="bulletins"]')) {
-          var bb = document.createElement('button'); bb.type = 'button'; bb.setAttribute('data-page', 'bulletins'); bb.setAttribute('aria-label', 'Bulletins'); bb.className = pg === 'bulletins' ? 'active' : ''; bb.textContent = 'Bulletins'; bb.onclick = function(){ go('bulletins'); };
-          var af2 = nav.querySelector('[data-page="messages"]'); if (af2 && af2.nextSibling) nav.insertBefore(bb, af2.nextSibling); else nav.appendChild(bb);
-        }
-        if (pg === 'viescolaire' && !cp.vie && typeof go === 'function') { go('home'); return; }
-      }
-      if (!c || !isSupRole()) return;
-      var cap = staffCaps();
-      /* lecture seule dans la vie scolaire */
-      if (pg === 'viescolaire' && cap.vie === 'read') c.querySelectorAll('button[onclick^="vsNewAbsence"],button[onclick^="vsNewRetard"],button[onclick^="vsReviewAbsence"],button[onclick^="vsDeleteAbsence"],button[onclick^="vsSaveAbsence"]').forEach(function(e){ e.remove(); });
-      /* publication d'annonces */
-      if (pg === 'annonces' && cap.annonces && !c.querySelector('.pp-new-annonce') && !c.querySelector('button[onclick^="newAnnonce"]')) {
-        var nb = document.createElement('button'); nb.className = 'btn primary pp-new-annonce'; nb.textContent = '+ Nouvelle annonce'; nb.onclick = function(){ newAnnonce(); };
-        c.insertBefore(nb, c.children[Math.min(2, c.children.length)] || null);
-      }
-    } catch (e) {}
-  }
-  setInterval(staffUi, 900);
-
-  /* ===== Demandes de modification de profil ===== */
-  function myParentRec(){ return typeof currentParent === 'function' ? currentParent() : null; }
-  var PSTAT = { pending: ['En attente', ''], approved: ['Acceptée', 'lu'], rejected: ['Refusée', ''] };
-  function myRequestsHtml(){
-    var p = myParentRec(); if (!p) return '';
-    var L = (state.profileRequests || []).filter(function(r){ return String(r.parentId) === String(p.id); }).sort(function(a, b){ return String(b.createdAt || '') < String(a.createdAt || '') ? -1 : 1; });
-    var pending = L.some(function(r){ return r.status === 'pending'; });
-    var rows = L.map(function(r){
-      var ch = r.changes || {}, st = PSTAT[r.status] || PSTAT.pending;
-      return '<div class="item"><span class="badge ' + st[1] + '">' + st[0] + '</span> <b>' + (ch.name ? 'Nom → ' + esc(ch.name) : '') + (ch.name && ch.phone ? ' · ' : '') + (ch.phone ? 'Téléphone → ' + esc(ch.phone) : '') + '</b><div class="muted">Demande du ' + esc(fmtDt(r.createdAt)) + (r.note ? ' · ' + esc(r.note) : '') + '</div></div>';
-    }).join('');
-    return '<div class="panel pp-myprofile"><div class="panel-head"><h3>Mes informations</h3></div><p>Nom : <b>' + esc(p.name) + '</b><br>Téléphone : <b>' + esc(p.phone || 'non renseigné') + '</b></p>'
-      + '<p class="muted">Pour changer votre nom ou votre numéro, envoyez une demande : l’administration la vérifie, puis vous prévient.</p>'
-      + (pending ? '<p><span class="badge">Une demande est en attente de validation</span></p>' : '<button class="btn primary" onclick="ppProfileRequestForm()">✏️ Demander une modification</button>')
-      + (rows ? '<div style="margin-top:10px">' + rows + '</div>' : '') + '</div>';
-  }
-  window.ppProfileRequestForm = function(){
-    var p = myParentRec(); if (!p || document.getElementById('ppPrOv')) return;
-    var o = document.createElement('div'); o.id = 'ppPrOv';
-    o.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:100000;background:rgba(15,23,42,.7);display:flex;align-items:center;justify-content:center;padding:16px';
-    o.innerHTML = '<div class="panel" style="width:min(440px,100%);max-height:90vh;overflow:auto;margin:0"><h2>Demande de modification</h2><p class="muted">Remplissez uniquement ce que vous voulez changer.</p>'
-      + '<div class="field"><label>Nouveau nom</label><input id="prName" placeholder="' + esc(p.name) + '"></div>'
-      + '<div class="field"><label>Nouveau numéro de téléphone</label><input id="prPhone" type="tel" placeholder="' + esc(p.phone || '+237 6 xx xx xx xx') + '"></div>'
-      + '<div class="field"><label>Motif (facultatif)</label><input id="prReason" placeholder="Ex. nouveau numéro"></div>'
-      + '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" id="prOk">Envoyer la demande</button><button class="btn secondary" id="prNo">Annuler</button></div></div>';
-    document.body.appendChild(o);
-    byId('prNo').onclick = function(){ o.remove(); };
-    byId('prOk').onclick = function(){
-      var nm = byId('prName').value.trim(), ph = byId('prPhone').value.trim();
-      if (!nm && !ph) return toast('Indiquez le nom ou le numéro à modifier');
-      if (nm && nm.length < 3) return toast('Nom trop court');
-      if (ph && !pk(ph)) return toast('Numéro de téléphone invalide');
-      if (nm && nz(nm) === nz(p.name)) nm = '';
-      if (ph && pk(ph) === pk(p.phone)) ph = '';
-      if (!nm && !ph) return toast('Rien à modifier : les informations sont identiques');
-      var ch = {}; if (nm) ch.name = nm; if (ph) ch.phone = ph;
-      state.profileRequests = state.profileRequests || [];
-      state.profileRequests.push({ id: Date.now(), parentId: p.id, parentName: p.name, changes: ch, reason: byId('prReason').value.trim(), status: 'pending', createdAt: new Date().toISOString() });
-      if (typeof markLocalChange === 'function') markLocalChange();
-      save(true); o.remove(); render(); toast('Demande envoyée à l’administration');
-      if (serverMode() && state.api.sessionToken) syncWithServer(true);
-    };
-  };
-  function pendingRequests(){ return (state.profileRequests || []).filter(function(r){ return r.status === 'pending'; }); }
-  function adminRequestsHtml(){
-    var L = pendingRequests();
-    if (!L.length) return '';
-    return '<div class="panel pp-prof-req"><div class="panel-head"><h3>Demandes de modification de profil (' + L.length + ')</h3></div>' + L.map(function(r){
-      var p = parentById(r.parentId) || { name: r.parentName || 'Parent', phone: '' }, ch = r.changes || {};
-      return '<div class="item"><b>' + esc(p.name) + '</b><div class="muted">' + (ch.name ? 'Nom : ' + esc(p.name) + ' → <b>' + esc(ch.name) + '</b><br>' : '') + (ch.phone ? 'Téléphone : ' + esc(p.phone || '—') + ' → <b>' + esc(ch.phone) + '</b><br>' : '') + (r.reason ? 'Motif : ' + esc(r.reason) + '<br>' : '') + esc(fmtDt(r.createdAt)) + '</div>'
-        + '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" onclick="ppProfileDecide(' + Number(r.id) + ',\'approved\')">✓ Accepter</button><button class="btn danger" onclick="ppProfileDecide(' + Number(r.id) + ',\'rejected\')">Refuser</button></div></div>';
-    }).join('') + '</div>';
-  }
-  window.ppProfileDecide = function(id, decision){
-    var r = (state.profileRequests || []).filter(function(x){ return x.id === id; })[0]; if (!r || r.status !== 'pending') return;
-    var p = parentById(r.parentId), note = '';
-    if (decision === 'approved') {
-      if (!p) return toast('Parent introuvable');
-      var ch = r.changes || {};
-      if (ch.phone) {
-        var k = pk(ch.phone), dup = (state.parents || []).some(function(x){ return x.id !== p.id && pk(x.phone) === k; }) || (state.teachers || []).some(function(t){ return pk(t.phone) === k; }) || (state.staff || []).some(function(t){ return pk(t.phone) === k; });
-        if (dup) return toast('Ce numéro est déjà utilisé par une autre personne : refusez ou demandez un autre numéro');
-      }
-      if (!confirm('Accepter cette modification ?' + (ch.name ? '\n\nLe parent se connectera désormais avec le nom « ' + ch.name + ' ».' : ''))) return;
-      if (ch.name) p.name = ch.name;
-      if (ch.phone) p.phone = ch.phone;
-    } else {
-      note = prompt('Motif du refus (facultatif) :', '') || '';
-    }
-    r.status = decision; r.decidedAt = new Date().toISOString(); r.decidedBy = 'Administration'; if (note) r.note = note;
-    if (typeof markLocalChange === 'function') markLocalChange();
-    save(true); render(); toast(decision === 'approved' ? 'Modification acceptée' : 'Demande refusée');
-    if (serverMode() && state.api.sessionToken) syncWithServer(true);
-  };
-  function profileUi(){
-    try {
-      if (!state || !state.user) return;
-      var c = document.querySelector('.content'); if (!c) return;
-      var pg = (typeof page !== 'undefined') ? page : '';
-      var isP = typeof isAdmin === 'function' && !isAdmin() && !isSupRole() && !(typeof isTeacher === 'function' && isTeacher()) && !!myParentRec();
-      if (isP && pg === 'profil' && !c.querySelector('.pp-myprofile')) {
-        var h = myRequestsHtml(), t = document.createElement('div'); t.innerHTML = h; if (t.firstChild) c.insertBefore(t.firstChild, c.children[Math.min(2, c.children.length)] || null);
-      }
-      if (isP && pg === 'profil' && serverMode()) c.querySelectorAll('input').forEach(function(i){ if (/^(pn|pname|profName|pp|pphone|profPhone|name|phone)$/i.test(i.id || '') || /phone|t[ée]l/i.test(i.id || '') || /name|nom/i.test(i.id || '')) { if (!i.dataset.ppRo && !/pass|old|new|search/i.test(i.id || '')) { i.dataset.ppRo = '1'; i.readOnly = true; i.style.opacity = '.7'; } } });
-      if (typeof isAdmin === 'function' && isAdmin()) {
-        var n = pendingRequests().length;
-        if (pg === 'parents') {
-          var ex = c.querySelector('.pp-prof-req');
-          if (n && !ex) { var tt = document.createElement('div'); tt.innerHTML = adminRequestsHtml(); if (tt.firstChild) c.insertBefore(tt.firstChild, c.children[Math.min(2, c.children.length)] || null); }
-          else if (!n && ex) ex.remove();
-          else if (n && ex && ex.querySelectorAll('.item').length !== n) { var t3 = document.createElement('div'); t3.innerHTML = adminRequestsHtml(); ex.replaceWith(t3.firstChild); }
-        }
-        if (pg === 'home' && n && !c.querySelector('.pp-prof-banner')) {
-          var bn = document.createElement('div'); bn.className = 'panel pp-prof-banner';
-          bn.innerHTML = '<div class="panel-head"><h3>Action requise</h3></div><p>' + n + ' demande(s) de modification de profil à traiter.</p><button class="btn primary" onclick="go(\'parents\')">Voir les demandes</button>';
-          c.insertBefore(bn, c.firstChild);
-        }
-      }
-    } catch (e) {}
-  }
-  setInterval(profileUi, 900);
 })();
 
+</script>
+<style id="pp-v3-ameliorations">
+:root{--brand-50:#eef8f5;--brand-100:#d5eee6;--brand-200:#a9dccb;--brand-500:#3a9a85;--brand-600:#2d7b6c;--brand-700:#226255;--brand-800:#1a4c43;--brand-900:#133a33;--brand-950:#0b2620;--gold-500:#d89a45;
+--bg:#f7f5f0;--card:#fff;--text:#1d2b28;--muted:#5f6f6b;--border:#e6e1d6;--primary:#2d7b6c;--primary-hover:#226255;--primary-soft:#eef8f5;--accent:#d89a45;--top-bg:#fff;--side-bg:#fff}
+body.dark{--bg:#0f1715;--card:#17221f;--text:#e8f1ee;--muted:#9fb3ad;--border:#2a3a36;--primary:#5cc3a9;--primary-hover:#7fd3bd;--primary-soft:#173a32;--accent:#e8b56a;--top-bg:#17221f;--side-bg:#17221f}
+body{background:var(--bg);color:var(--text)}
+.btn,button.btn{min-height:44px;border-radius:12px}
+.btn.primary{background:var(--primary)!important;border-color:var(--primary)!important;color:#fff!important}
+.btn.primary:hover{background:var(--primary-hover)!important}
+:focus-visible{outline:3px solid var(--accent)!important;outline-offset:2px}
+.nav button.active{background:var(--primary-soft)!important;color:var(--primary)!important;border-left-color:var(--primary)!important}
+.version-tag,.pp-ver{display:none!important}
+.toast{border-radius:12px!important;background:var(--brand-800)!important;color:#fff!important;z-index:100000!important}
+.item .btn.danger{background:transparent!important;color:#b42318!important;border:1px solid #f1c8c3!important}
+body.dark .item .btn.danger{color:#ff9b8f!important;border-color:#5a2a26!important}
+@media (max-width:900px){.nav{overflow-x:auto;scrollbar-width:none}.nav button{white-space:nowrap!important;flex:0 0 auto!important;text-overflow:clip!important}.nav .logout{display:none!important}}
+.ppm-back{position:fixed;inset:0;background:rgba(10,25,22,.55);display:flex;align-items:center;justify-content:center;z-index:99999;padding:16px}
+.ppm{background:#fff;color:#1d2b28;border-radius:18px;padding:22px;width:100%;max-width:420px;box-shadow:0 20px 50px rgba(0,0,0,.25);font-family:system-ui,sans-serif}
+.ppm h2{margin:0 0 8px;font-size:1.2rem}.ppm p{color:#5f6f6b;margin:0 0 14px;line-height:1.45}
+.ppm label{display:block;font-weight:600;margin-bottom:6px}
+.ppm input{width:100%;box-sizing:border-box;min-height:44px;padding:10px 12px;border:1px solid #d9d3c6;border-radius:10px;background:#f7f5f0;color:#1d2b28;font-size:16px}
+.ppm .err{color:#b42318;font-size:.9rem;min-height:1.2em;margin:6px 0 0}
+.ppm .acts{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.ppm .acts button{min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #d9d3c6;background:#fff;color:#1d2b28;font-weight:600;cursor:pointer}
+.ppm .acts .ok{background:#2d7b6c;border-color:#2d7b6c;color:#fff}.ppm .acts .ok.danger{background:#b42318;border-color:#b42318}
+.ppm-back.dark .ppm{background:#17221f;color:#e8f1ee}.ppm-back.dark .ppm p{color:#9fb3ad}.ppm-back.dark .ppm input{background:#0f1715!important;color:#e8f1ee!important;border-color:#2a3a36!important}.ppm-back.dark .ppm .acts button:not(.ok){background:#17221f;color:#e8f1ee;border-color:#2a3a36}
+.pp-logout-profile{margin-top:16px}
+</style>
+<script id="pp-v3-script">
+(function(){
+function norm(s){return String(s||"").trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();}
+var cur=null;
+function modal(o){return new Promise(function(res){
+ var prev=document.activeElement,b=document.createElement("div");b.className="ppm-back"+(document.body.classList.contains("dark")?" dark":"");
+ b.innerHTML='<div class="ppm" role="dialog" aria-modal="true" aria-labelledby="ppmT"><h2 id="ppmT"></h2><p class="msg"></p>'+(o.label?'<label for="ppmI"></label><input id="ppmI" type="text" autocomplete="off"><div class="err" role="alert"></div>':'')+'<div class="acts">'+(o.noCancel?'':'<button type="button" class="no">Annuler</button>')+'<button type="button" class="ok'+(o.danger?' danger':'')+'"></button></div></div>';
+ b.querySelector("h2").textContent=o.title;var m=b.querySelector(".msg");if(o.message)m.textContent=o.message;else m.remove();
+ b.querySelector(".ok").textContent=o.ok||"Enregistrer";
+ var inp=b.querySelector("input");if(inp){b.querySelector("label").textContent=o.label;inp.value=o.value||"";inp.placeholder=o.placeholder||"";}
+ function close(v){cur=null;b.remove();document.removeEventListener("keydown",k,true);try{prev&&prev.focus()}catch(e){}setTimeout(function(){res(v)},0);}
+ function ok(){if(!inp)return close(true);var v=inp.value.trim().replace(/\s+/g," "),e=o.validate?o.validate(v):"";if(e){b.querySelector(".err").textContent=e;inp.focus();return;}close(v);}
+ function k(e){if(e.key==="Escape"){e.stopPropagation();close(null);}else if(e.key==="Enter"&&inp&&document.activeElement===inp){e.preventDefault();ok();}}
+ b.querySelector(".ok").onclick=ok;var n=b.querySelector(".no");if(n)n.onclick=function(){close(null)};
+ b.addEventListener("click",function(e){if(e.target===b)close(null)});document.addEventListener("keydown",k,true);
+ cur=b;document.documentElement.appendChild(b);setTimeout(function(){(inp||b.querySelector(".ok")).focus();if(inp)inp.select();},30);});}
+setInterval(function(){if(cur&&!cur.isConnected)document.documentElement.appendChild(cur);},200);
+window.ppModal=modal;
+function info(t,m){return modal({title:t,message:m,ok:"Compris",noCancel:true});}
+function dirty(){try{if(typeof markLocalChange==="function")markLocalChange()}catch(e){}}
+function log(a,d){try{if(typeof logActivity==="function")logActivity(a,d)}catch(e){}}
+function classUse(c){var n=0;(state.parents||[]).forEach(function(p){if(p.className===c)n++;(p.children||[]).forEach(function(x){if(x.className===c)n++})});
+ ["teachers","students","grades","absences","bulletins"].forEach(function(k){(state[k]||[]).forEach(function(x){if(x&&(x.className===c||x.classe===c||(Array.isArray(x.classes)&&x.classes.indexOf(c)>-1)))n++})});return n;}
+function vName(list,skip,label){return function(v){if(!v)return "Saisissez le nom de la "+label+".";if(v.length<2)return "Le nom doit contenir au moins 2 caractères.";if(v.length>40)return "40 caractères maximum.";
+ if(list.some(function(s,i){return i!==skip&&norm(s)===norm(v)}))return "Cette "+label+" existe déjà.";return "";};}
+window.addClassPrompt=function(){if(!Array.isArray(state.classes))state.classes=[];modal({title:"Ajouter une classe",label:"Nom de la classe",placeholder:"Ex. 1ère A4",ok:"Ajouter",validate:vName(state.classes,-1,"classe")}).then(function(v){if(v==null)return;state.classes.push(v);dirty();save();log("Classe ajoutée",v);toast("Classe « "+v+" » ajoutée");go("classes");});};
+window.renameClass=function(i){var old=state.classes[i];if(old==null)return;modal({title:"Renommer la classe",label:"Nouveau nom",value:old,validate:vName(state.classes,i,"classe")}).then(function(v){if(v==null||v===old)return;state.classes[i]=v;
+ function f(x){if(!x)return;if(x.className===old)x.className=v;if(x.classe===old)x.classe=v;if(Array.isArray(x.classes))x.classes=x.classes.map(function(c){return c===old?v:c});}
+ (state.parents||[]).forEach(function(p){f(p);(p.children||[]).forEach(f);if(p.children&&p.children[0]){p.student=p.children[0].name;p.className=p.children[0].className;}});
+ ["teachers","students","grades","absences","bulletins","annonces"].forEach(function(k){(state[k]||[]).forEach(f)});
+ if(state.classPrincipals&&state.classPrincipals[old]!=null){state.classPrincipals[v]=state.classPrincipals[old];delete state.classPrincipals[old];}
+ dirty();save();log("Classe renommée",old+" → "+v);toast("Classe renommée");go("classes");});};
+window.deleteClass=function(i){var c=state.classes[i];if(c==null)return;var n=classUse(c);
+ if(n>0)return info("Suppression impossible","La classe « "+c+" » est encore utilisée ("+n+" fiche(s) : parents, élèves, notes…). Déplacez ou renommez ces fiches avant de la supprimer.");
+ modal({title:"Supprimer la classe ?",message:"La classe « "+c+" » sera définitivement supprimée.",ok:"Supprimer",danger:true}).then(function(y){if(!y)return;state.classes.splice(i,1);dirty();save();log("Classe supprimée",c);toast("Classe supprimée");go("classes");});};
+function adminOk(){if(typeof isAdmin==="function"&&!isAdmin()){toast("Accès administrateur requis");return false;}if(!Array.isArray(state.subjects))state.subjects=[];return true;}
+window.addSubjectPrompt=function(){if(!adminOk())return;modal({title:"Ajouter une matière",label:"Nom de la matière",placeholder:"Ex. Mathématiques",ok:"Ajouter",validate:vName(state.subjects,-1,"matière")}).then(function(v){if(v==null)return;state.subjects.push(v);dirty();save();log("Matière ajoutée",v);toast("Matière « "+v+" » ajoutée");go("subjects");});};
+window.addSubjectFromForm=function(){if(!adminOk())return;var el=document.getElementById("newSubjectName"),v=el?el.value.trim():"",e=vName(state.subjects,-1,"matière")(v);if(e)return toast(e);state.subjects.push(v);dirty();save();toast("Matière « "+v+" » ajoutée");go("subjects");};
+window.renameSubject=function(i){if(!adminOk())return;var old=state.subjects[i];if(old==null)return;modal({title:"Modifier la matière",label:"Nouveau nom",value:old,validate:vName(state.subjects,i,"matière")}).then(function(v){if(v==null||v===old)return;state.subjects[i]=v;
+ (state.teachers||[]).forEach(function(t){if(t&&Array.isArray(t.subjects))t.subjects=t.subjects.map(function(s){return s===old?v:s})});
+ (state.grades||[]).forEach(function(g){if(g&&g.subject===old)g.subject=v});dirty();save();log("Matière renommée",old+" → "+v);toast("Matière renommée");go("subjects");});};
+window.deleteSubject=function(i){if(!adminOk())return;var s=state.subjects[i];if(s==null)return;var g=(state.grades||[]).filter(function(x){return x&&x.subject===s}).length;
+ if(g)return info("Suppression impossible","La matière « "+s+" » contient "+g+" note(s). Elle est conservée pour ne pas perdre l'historique des bulletins.");
+ modal({title:"Supprimer la matière ?",message:"« "+s+" » sera retirée de la liste et des fiches enseignants.",ok:"Supprimer",danger:true}).then(function(y){if(!y)return;state.subjects.splice(i,1);(state.teachers||[]).forEach(function(t){if(t&&Array.isArray(t.subjects))t.subjects=t.subjects.filter(function(x){return x!==s})});dirty();save();log("Matière supprimée",s);toast("Matière supprimée");go("subjects");});};
+window.requestNotifPermission=function(){if(!("Notification" in window))return toast("Ce navigateur ne gère pas les notifications.");
+ if(Notification.permission==="granted")return toast("Les notifications sont déjà activées.");
+ if(Notification.permission==="denied")return toast("Notifications bloquées : autorisez-les dans les réglages du navigateur.");
+ Notification.requestPermission().then(function(p){toast(p==="granted"?"Notifications activées":"Notifications non autorisées");});};
+var _push=window.showPush;
+window.showPush=function(t,b,tag){if(!("Notification" in window)){toast((t||"Notification")+" — "+(b||""));return;}
+ if(Notification.permission!=="granted"){toast("Activez d'abord les notifications pour recevoir ce test.");return;}
+ try{_push(t,b,tag);}catch(e){toast(t+" — "+(b||""));}};
+window.saveApiSettings=function(){if(typeof isAdmin==="function"&&!isAdmin())return toast("Accès administrateur requis");
+ var base=((document.getElementById("apiBaseUrl")||{}).value||"").trim().replace(/\/+$/,""),school=((document.getElementById("apiSchoolId")||{}).value||"").trim();
+ if(base){var u;try{u=new URL(base)}catch(e){return toast("Adresse du serveur invalide.");}
+  if(!/^https?:$/.test(u.protocol))return toast("L'adresse doit commencer par https://");
+  if(u.username||u.password)return toast("N'incluez pas d'identifiant ou de mot de passe dans l'adresse.");
+  if(!school)return toast("Indiquez l'identifiant de l'école.");
+  if(!/^[a-z0-9-]{2,40}$/i.test(school))return toast("Identifiant d'école : lettres, chiffres et tirets uniquement.");}
+ state.api=state.api||{};state.api.baseUrl=base;state.api.schoolId=school||"cst-manjo";state.api.enabled=!!base;state.api.lastSyncStatus=base?"configured":"local";
+ try{ensureApiConfig()}catch(e){}save();toast(base?"Configuration enregistrée":"Mode local (sans serveur) enregistré");go("profil");};
+function tidy(){
+ document.querySelectorAll(".version-tag,.pp-ver").forEach(function(e){e.remove()});
+ document.querySelectorAll(".gesco40-muted").forEach(function(e){if(/Centre de contrôle mobile/.test(e.textContent))e.textContent="Vue d'ensemble des échanges avec les familles.";});
+ document.querySelectorAll("body span,body div,body small,body p").forEach(function(e){if(e.children.length===0&&/^Sync : /.test(e.textContent)){e.textContent=e.textContent.replace(/^Sync : En attente/,"Synchronisation en attente").replace(/^Sync : /,"Synchronisation : ");}});
+ if(/v\d+\.\d+/.test(document.title))document.title=document.title.replace(/\s*[-–·]?\s*v\d+(\.\d+)+/g,"");
+ var prof=(typeof page!=="undefined"&&page==="profil")?document.querySelector("section.content"):null;
+ if(prof&&!prof.querySelector(".pp-logout-profile")&&typeof logout==="function"){var d=document.createElement("div");d.className="panel pp-logout-profile";d.innerHTML='<h3>Session</h3><p class="muted">Fermez votre session sur cet appareil.</p><button type="button" class="btn danger">Se déconnecter</button>';d.querySelector("button").onclick=function(){modal({title:"Se déconnecter ?",ok:"Se déconnecter",danger:true}).then(function(y){if(y)logout()})};prof.appendChild(d);}
+}
+var t;new MutationObserver(function(){clearTimeout(t);t=setTimeout(tidy,80)}).observe(document.body,{childList:true,subtree:true});
+setTimeout(tidy,300);
+})();
 </script>
 </body>
 </html>
