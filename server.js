@@ -8,7 +8,7 @@ const zlib = require('zlib');
 const { createStore } = require('./store');
 const push = require('./push');
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const SERVICE = 'portail-parents-server';
 const PORT = Number(process.env.PORT) || 3000;
 const MAX_BODY = (Number(process.env.MAX_BODY_MB) || 30) * 1024 * 1024;
@@ -20,9 +20,18 @@ const PUBLIC_DIR = HAS_PUBLIC ? path.join(__dirname, 'public') : __dirname;
 const ROOT_ALLOWED = new Set(['index.html', 'manifest.json', 'sw.js', 'icon-192.png', 'icon-512.png']);
 
 /* ---------- jeux de clés synchronisées ---------- */
-const ARRAY_ADMIN = ['teachers', 'parents', 'classes', 'subjects', 'sequences', 'templates', 'events', 'annonces', 'students'];
+const ARRAY_ADMIN = ['teachers', 'parents', 'classes', 'subjects', 'sequences', 'templates', 'events', 'students', 'staff'];
 const OBJECT_ADMIN = ['classPrincipals', 'supervisor', 'profiles', 'smsSettings', 'whatsappSettings', 'school'];
-const SHARED = ['messages', 'bulletins', 'bulletinRequests', 'bulletinHistory', 'grades', 'absences'];
+const SHARED = ['messages', 'bulletins', 'bulletinRequests', 'bulletinHistory', 'grades', 'absences', 'annonces', 'profileRequests'];
+/* Personnel de direction : droits de chaque fonction (surveillant = compte historique). vie : 'write' (saisie) ou 'read' (lecture) */
+const STAFF_ROLES = {
+  surveillant: { label: 'Surveillant général', vie: 'write', notes: true, bulletins: false, annonces: false },
+  vice: { label: 'Vice-principal', vie: 'read', notes: true, bulletins: true, annonces: true },
+  prefet: { label: 'Préfet des études', vie: 'read', notes: true, bulletins: true, annonces: true },
+  comptable: { label: 'Comptable', vie: false, notes: false, bulletins: false, annonces: true }
+};
+const capsOf = acc => STAFF_ROLES[(acc && acc.staffRole) || 'surveillant'] || STAFF_ROLES.surveillant;
+const MAX_ATTACH = (Number(process.env.MAX_ATTACH_MB) || 6) * 1024 * 1024;
 const MAX_RECORDS = 60000;
 const MAX_FILE = (Number(process.env.MAX_FILE_MB) || 10) * 1024 * 1024;
 const PUSH_ON = process.env.PUSH_ENABLED !== 'false';
@@ -79,9 +88,13 @@ function nameMatches(acc, typed) {
 const weakPin = pin => /^(\d)\1{3}$/.test(pin) || ['1234', '4321', '0123', '3210', '1212', '2580', '0852', '1122'].includes(pin);
 function provision(kind, rec) {
   if (!rec || rec.id == null) return null;
+  const staff = kind === 'staff';
   const id = kind + ':' + rec.id;
   let acc = db.accounts[id], created = false;
-  if (!acc) { acc = db.accounts[id] = { id, role: kind, refId: rec.id, cred: null, pending: true }; created = true; }
+  if (!acc) { acc = db.accounts[id] = { id, role: staff ? 'supervisor' : kind, refId: rec.id, cred: null, pending: true }; created = true; }
+  acc.role = staff ? 'supervisor' : kind;
+  acc.staffRole = staff ? (STAFF_ROLES[rec.role] && rec.role !== 'surveillant' ? rec.role : 'vice') : (kind === 'supervisor' ? 'surveillant' : undefined);
+  acc.label = acc.staffRole ? STAFF_ROLES[acc.staffRole].label : undefined;
   acc.name = rec.name || acc.name || kind;
   acc.names = (kind === 'supervisor' ? [rec.name, rec.username || 'surveillant', 'surveillant'] : [rec.name]).filter(Boolean);
   acc.phoneKey = phoneKey(rec.phone);
@@ -94,6 +107,7 @@ function autoProvision() {
   (st.teachers || []).forEach(t => { const r = provision('teacher', t); if (r) keep.add(r.account.id); });
   (st.parents || []).forEach(p => { const r = provision('parent', p); if (r) keep.add(r.account.id); });
   if (isObj(st.supervisor) && st.supervisor.id != null) { const r = provision('supervisor', st.supervisor); if (r) keep.add(r.account.id); }
+  (st.staff || []).forEach(x => { const r = provision('staff', x); if (r) keep.add(r.account.id); });
   for (const id of Object.keys(db.accounts)) if (!keep.has(id)) { delete db.accounts[id]; delete db.notifs[id]; }
   for (const [h, s] of Object.entries(db.sessions)) if (!db.accounts[s.acc]) delete db.sessions[h];
 }
@@ -151,7 +165,7 @@ function authenticate(req) {
   return acc && acc.active ? acc : null;
 }
 function publicUser(acc) {
-  return { id: acc.role === 'admin' ? 'admin' : acc.refId, role: acc.role, username: (acc.names || acc.usernames || [])[0] || acc.id, name: acc.name };
+  return { id: acc.role === 'admin' ? 'admin' : acc.refId, role: acc.role, username: (acc.names || acc.usernames || [])[0] || acc.id, name: acc.name, staffRole: acc.staffRole, label: acc.label };
 }
 
 /* ---------- contexte d'un utilisateur ---------- */
@@ -166,7 +180,10 @@ function ctxFor(acc) {
     const p = (st.parents || []).find(x => String(x.id) === String(acc.refId)); ctx.me = p || null;
     if (p) { (p.children || []).forEach(c => { if (c) cls.add(norm(typeof c === 'object' ? (c.className || c.classe || c.class) : '')); }); if (p.className) cls.add(norm(p.className)); }
     cls.delete('');
-  } else if (acc.role === 'supervisor') ctx.me = isObj(st.supervisor) ? st.supervisor : null;
+  } else if (acc.role === 'supervisor') {
+    ctx.me = String(acc.id).indexOf('staff:') === 0 ? ((st.staff || []).find(x => String(x.id) === String(acc.refId)) || null) : (isObj(st.supervisor) ? st.supervisor : null);
+    ctx.label = acc.label || 'Surveillant général'; ctx.caps = capsOf(acc);
+  }
   ctx.classes = [...cls];
   return ctx;
 }
@@ -182,7 +199,8 @@ function visibleMsg(m, ctx) {
       (m.senderRole === 'teacher' && idIs(m.senderId, 'teacher', me.id));
   }
   if (ctx.role === 'supervisor') {
-    return m.recipientRole === 'supervisor' || m.senderRole === 'supervisor' || (me && (m.to === me.name || m.from === me.name)) || m.group === 'ALL';
+    const lab = ctx.label;
+    return (m.recipientRole === 'supervisor' && (m.recipientId == null || idIs(m.recipientId, 'supervisor', ctx.ref))) || (m.senderRole === 'supervisor' && idIs(m.senderId, 'supervisor', ctx.ref)) || m.to === lab || m.from === lab || (me && (m.to === me.name || m.from === me.name)) || m.group === 'ALL';
   }
   if (ctx.role === 'parent') {
     if (!me) return false;
@@ -217,6 +235,19 @@ const pick = (src, fields) => { const o = {}; fields.forEach(f => { if (src[f] !
 /* Identifiant d'expéditeur : accepte 12 ou "teacher:12" / "supervisor:1". */
 const idIs = (v, role, ref) => String(v) === String(ref) || String(v) === role + ':' + ref;
 
+/* Pièce jointe : on ne garde que le nom, le type et l'identifiant du fichier stocké par ce même compte (jamais d'identifiant d'un autre). */
+function cleanAttach(att, acc) {
+  if (!isObj(att)) return null;
+  const out = { name: String(att.name || 'fichier').slice(0, 120), size: att.size, type: String(att.type || '').slice(0, 80) };
+  if (att.fileId) {
+    const f = db.files[att.fileId];
+    if (f && f.kind === 'attach' && (f.owner === acc.id || acc.role === 'admin')) { out.fileId = att.fileId; return out; }
+    return null;
+  }
+  if (typeof att.data === 'string' && att.data.length <= 300000) { out.data = att.data; return out; }
+  return null;
+}
+
 /* Renvoie l'enregistrement fusionné, ou null si l'écriture n'est pas autorisée. */
 function authorize(key, old, raw, ctx) {
   const role = ctx.role, ref = ctx.ref;
@@ -224,12 +255,31 @@ function authorize(key, old, raw, ctx) {
   switch (key) {
     case 'messages': {
       if (old) { if (!visibleMsg(old, ctx)) return null; return mergeRecord(key, old, pick(raw, MUT_MSG)); }
+      if (role === 'supervisor') raw = Object.assign({}, raw, { senderRole: 'supervisor', senderId: 'supervisor:' + ref, from: ctx.label });     // identité imposée par le serveur
       if (raw.senderRole && (raw.senderRole !== role || !idIs(raw.senderId, role, ref))) return null;
       if (role === 'parent' && (raw.group || raw.groupId)) return null;
       if (role === 'teacher' && raw.group && (raw.group === 'ALL' || !inClasses(ctx, raw.group))) return null;
       if (role === 'teacher' && raw.parentId != null && !(db.state.parents || []).some(p => String(p.id) === String(raw.parentId))) return null;
       if (!visibleMsg(raw, ctx)) return null;
-      return Object.assign({}, raw);
+      const rec = Object.assign({}, raw);
+      if (rec.attach) { rec.attach = cleanAttach(rec.attach, ctx.acc); if (!rec.attach) delete rec.attach; }
+      if (rec.voice && JSON.stringify(rec.voice).length > 400000) rec.voice = null;
+      return rec;
+    }
+    case 'annonces': {
+      if (role === 'supervisor' && ctx.caps.annonces) {
+        if (old) return String(old.byAcc) === ctx.acc.id ? mergeRecord(key, old, pick(raw, ['title', 'body', 'target', 'pinned', 'urgent'])) : null;
+        if (JSON.stringify(raw).length > 20000) return null;
+        return Object.assign({}, raw, { by: ctx.label, byAcc: ctx.acc.id });
+      }
+      return null;
+    }
+    case 'profileRequests': {
+      if (role !== 'parent' || old) return null;
+      const ch = isObj(raw.changes) ? raw.changes : {}, nm = String(ch.name || '').trim().slice(0, 80), ph = String(ch.phone || '').trim().slice(0, 30);
+      if ((!nm && !ph) || String(raw.parentId) !== String(ref)) return null;
+      if ((db.state.profileRequests || []).some(r => String(r.parentId) === String(ref) && r.status === 'pending')) return null;
+      return { id: raw.id, parentId: ref, parentName: ctx.me ? ctx.me.name : '', changes: Object.assign({}, nm ? { name: nm } : {}, ph ? { phone: ph } : {}), reason: String(raw.reason || '').slice(0, 300), status: 'pending', createdAt: raw.createdAt || new Date().toISOString() };
     }
     case 'bulletinRequests': {
       if (role === 'parent') {
@@ -241,6 +291,14 @@ function authorize(key, old, raw, ctx) {
       return null;
     }
     case 'bulletins': {
+      if (role === 'supervisor' && ctx.caps.bulletins) {
+        if (!old) {
+          if (raw.kind !== 'class' || !raw.fileId || !db.files[raw.fileId] || !(db.state.teachers || []).some(t => String(t.id) === String(raw.principalTeacherId))) return null;
+          const rep = (db.state.bulletins || []).filter(b => b.kind === 'class' && norm(b.className) === norm(raw.className) && b.sequence === raw.sequence).map(b => b.id);
+          return Object.assign({ _replaces: rep }, pick(raw, ['id', 'className', 'sequence', 'name', 'fileId', 'size', 'date', 'type', 'available', 'principalTeacherId']), { kind: 'class', stage: 'toPrincipal', importedBy: ctx.label });
+        }
+        return old.kind === 'class' ? mergeRecord(key, old, pick(raw, ['available'])) : null;
+      }
       if (role === 'teacher' && old && old.requestId != null && String(old.principalTeacherId) === String(ref)) return mergeRecord(key, old, pick(raw, ['stage', 'forwardedAt', 'forwardedBy']));
       return null;
     }
@@ -255,8 +313,13 @@ function authorize(key, old, raw, ctx) {
       return null;
     }
     case 'absences': {
-      if (role === 'parent') { if (old && inClasses(ctx, old.className)) return mergeRecord(key, old, pick(raw, ['justification', 'status'])); return null; }
-      if (role === 'supervisor') return mergeRecord(key, old, raw);
+      if (role === 'parent') {
+        if (!(old && inClasses(ctx, old.className))) return null;
+        const upd = pick(raw, ['justification', 'status']);
+        if (isObj(upd.justification)) { upd.justification = Object.assign({}, upd.justification); if (upd.justification.attach) { const ca = cleanAttach(upd.justification.attach, ctx.acc); if (ca) upd.justification.attach = ca; else delete upd.justification.attach; } }
+        return mergeRecord(key, old, upd);
+      }
+      if (role === 'supervisor') return ctx.caps.vie === 'write' ? mergeRecord(key, old, raw) : null;
       if (role === 'teacher' && inClasses(ctx, raw.className) && (!old || inClasses(ctx, old.className))) return mergeRecord(key, old, raw);
       return null;
     }
@@ -275,6 +338,7 @@ function mergeShared(key, postedArr, ctx, base, allowDelete, rev) {
     const old = map.get(id);
     const res = authorize(key, old, raw, ctx);
     if (!res) continue;
+    if (res._replaces) { res._replaces.forEach(x => map.delete(String(x))); delete res._replaces; }
     if (!old || !same(old, res)) { res._rev = rev; map.set(id, res); changed = true; }
   }
   if (allowDelete) for (const [id, r] of map) if (!postedIds.has(id) && (r._rev || 0) <= base) { map.delete(id); changed = true; }
@@ -310,6 +374,7 @@ function viewFor(ctx) {
     const reqIds = new Set(out.bulletinRequests.map(r => String(r.id)));
     out.bulletins = A('bulletins').filter(b => b.stage === 'sentToParents' && inClasses(ctx, b.className) && b.requestId != null && reqIds.has(String(b.requestId)));
     out.bulletinHistory = A('bulletinHistory').filter(h => String(h.parentId) === String(ctx.ref));
+    out.profileRequests = A('profileRequests').filter(r => String(r.parentId) === String(ctx.ref));
     out.grades = A('grades').filter(g => inClasses(ctx, g.className) && myKids.includes(norm(g.student)));
     out.absences = A('absences').filter(a => inClasses(ctx, a.className) && myKids.includes(norm(a.student)));
   } else if (role === 'teacher') {
@@ -323,13 +388,15 @@ function viewFor(ctx) {
     out.grades = A('grades').filter(g => inClasses(ctx, g.className));
     out.absences = A('absences').filter(a => inClasses(ctx, a.className));
   } else if (role === 'supervisor') {
-    out.supervisor = ctx.me ? noPw(ctx.me) : {};
+    const caps = ctx.caps || STAFF_ROLES.surveillant;
+    out.supervisor = ctx.me ? Object.assign(noPw(ctx.me), { staffRole: ctx.acc.staffRole, label: ctx.label }) : {};
     out.teachers = A('teachers').map(teacherPub);
     out.parents = A('parents').map(noPw);
     out.students = A('students');
-    out.absences = A('absences');
-    out.grades = A('grades');
-    out.bulletinRequests = []; out.bulletins = []; out.bulletinHistory = [];
+    out.absences = caps.vie ? A('absences') : [];
+    out.grades = caps.notes ? A('grades') : [];
+    out.bulletins = caps.bulletins ? A('bulletins').filter(b => b.kind === 'class') : [];
+    out.bulletinRequests = []; out.bulletinHistory = [];
   }
   return out;
 }
@@ -401,7 +468,7 @@ function sync(acc, body) {
   need(isObj(body) && isObj(body.state), 400, 'État manquant');
   const ctx = ctxFor(acc), posted = body.state, base = Number(body.baseRevision || 0);
   const rev = db.revision + 1;
-  const prev = { messages: new Set((db.state.messages || []).map(m => String(m.id))), annonces: new Set((db.state.annonces || []).map(m => String(m.id))), absences: new Set((db.state.absences || []).map(m => String(m.id))) };
+  const prev = { messages: new Set((db.state.messages || []).map(m => String(m.id))), annonces: new Set((db.state.annonces || []).map(m => String(m.id))), absences: new Set((db.state.absences || []).map(m => String(m.id))), profile: new Map((db.state.profileRequests || []).map(r => [String(r.id), r.status])) };
   let changed = false, serverWins = false;
   if (acc.role === 'admin') {
     const seed = db.revision === 0;
@@ -419,7 +486,9 @@ function sync(acc, body) {
   SHARED.forEach(k => { if (Array.isArray(posted[k]) && mergeShared(k, posted[k], ctx, base, allowDelete, rev)) changed = true; });
   if (changed) {
     db.revision = rev;
-    schedulePush({ messages: (db.state.messages || []).filter(m => !prev.messages.has(String(m.id))), annonces: (db.state.annonces || []).filter(m => !prev.annonces.has(String(m.id))), absences: (db.state.absences || []).filter(m => !prev.absences.has(String(m.id))) });
+    schedulePush({ messages: (db.state.messages || []).filter(m => !prev.messages.has(String(m.id))), annonces: (db.state.annonces || []).filter(m => !prev.annonces.has(String(m.id))), absences: (db.state.absences || []).filter(m => !prev.absences.has(String(m.id))),
+      profileNew: (db.state.profileRequests || []).filter(r => !prev.profile.has(String(r.id))),
+      profileDecided: (db.state.profileRequests || []).filter(r => prev.profile.has(String(r.id)) && prev.profile.get(String(r.id)) === 'pending' && r.status !== 'pending') });
   }
   persist();
   maybeBackup();
@@ -488,7 +557,7 @@ function changePassword(acc, body) {
 
 function resetAccess(acc, body) {
   need(acc.role === 'admin', 403, 'Accès administrateur requis');
-  need(isObj(body) && ['teacher', 'parent', 'supervisor'].includes(body.kind), 400, 'Type de compte invalide');
+  need(isObj(body) && ['teacher', 'parent', 'supervisor', 'staff'].includes(body.kind), 400, 'Type de compte invalide');
   const a = db.accounts[body.kind + ':' + body.id];
   need(a, 404, 'Compte introuvable : synchronisez d’abord');
   a.cred = null; a.pending = true;
@@ -529,12 +598,15 @@ async function notifyFresh(fresh) {
   for (const a of accs) {
     const msgs = (fresh.messages || []).filter(m => addressed(a, m));
     if (msgs.length) await pushToAccount(a, { title: 'Nouveau message', body: msgs.length === 1 ? 'De ' + (msgs[0].from || 'l’établissement') : msgs.length + ' nouveaux messages', tag: 'pp-msg', page: 'messages' });
-    if (a.role !== 'admin' && (fresh.annonces || []).length) { const an = fresh.annonces; await pushToAccount(a, { title: 'Nouvelle annonce', body: an.length === 1 ? String(an[0].title || 'Annonce de l’établissement').slice(0, 90) : an.length + ' nouvelles annonces', tag: 'pp-annonce', page: 'annonces' }); }
+    const anAll = (fresh.annonces || []).filter(x => !(x.byAcc && x.byAcc === a.id));
+    if (a.role !== 'admin' && anAll.length) { const an = anAll; await pushToAccount(a, { title: 'Nouvelle annonce', body: an.length === 1 ? String(an[0].title || 'Annonce de l’établissement').slice(0, 90) : an.length + ' nouvelles annonces', tag: 'pp-annonce', page: 'annonces' }); }
+    if (a.role === 'admin' && (fresh.profileNew || []).length) await pushToAccount(a, { title: 'Demande de profil', body: (fresh.profileNew[0].parentName || 'Un parent') + ' demande une modification', tag: 'pp-profil', page: 'parents' });
+    if (a.role === 'parent') for (const r of (fresh.profileDecided || [])) if (String(r.parentId) === String(a.refId)) await pushToAccount(a, { title: 'Demande de profil', body: r.status === 'approved' ? 'Votre demande a été acceptée.' : 'Votre demande a été refusée.', tag: 'pp-profil', page: 'profil' });
     if (a.role === 'parent' && (fresh.absences || []).some(x => absenceFor(a, x))) await pushToAccount(a, { title: 'Absence signalée', body: 'Une absence a été enregistrée pour votre enfant.', tag: 'pp-absence', page: 'suivi' });
   }
 }
 function schedulePush(fresh) {
-  if (!PUSH_ON || !((fresh.messages || []).length || (fresh.annonces || []).length || (fresh.absences || []).length)) return;
+  if (!PUSH_ON || !((fresh.messages || []).length || (fresh.annonces || []).length || (fresh.absences || []).length || (fresh.profileNew || []).length || (fresh.profileDecided || []).length)) return;
   setImmediate(() => notifyFresh(fresh).catch(e => console.error('[push]', e.message)));
 }
 function subscribePush(acc, body) {
@@ -598,6 +670,7 @@ function canReadFile(acc, id) {
   if (!b) return false;
   if (acc.role === 'admin') return true;
   if (acc.role === 'teacher') return String(b.principalTeacherId) === String(acc.refId);
+  if (acc.role === 'supervisor') return capsOf(acc).bulletins && b.kind === 'class';
   if (acc.role === 'parent') {
     return b.stage === 'sentToParents' && b.requestId != null &&
       (db.state.bulletinRequests || []).some(r => String(r.id) === String(b.requestId) && String(r.parentId) === String(acc.refId));
@@ -605,7 +678,7 @@ function canReadFile(acc, id) {
   return false;
 }
 async function uploadFile(acc, body) {
-  need(acc.role === 'admin', 403, 'Accès administrateur requis');
+  need(acc.role === 'admin' || (acc.role === 'supervisor' && capsOf(acc).bulletins), 403, 'Accès non autorisé');
   need(isObj(body) && typeof body.data === 'string' && body.data.length > 0, 400, 'Fichier manquant');
   const b64 = body.data.replace(/^data:[^,]*,/, '');
   const buf = Buffer.from(b64, 'base64');
@@ -613,12 +686,45 @@ async function uploadFile(acc, body) {
   need(buf.slice(0, 5).toString('latin1') === '%PDF-', 400, 'Le fichier doit être un PDF');
   const id = crypto.randomBytes(12).toString('hex');
   await store.putFile(id, buf);
-  db.files[id] = { name: String(body.name || 'bulletin.pdf').slice(0, 120), size: buf.length, createdAt: Date.now() };
+  db.files[id] = { name: String(body.name || 'bulletin.pdf').slice(0, 120), size: buf.length, createdAt: Date.now(), kind: 'bulletin', owner: acc.id };
   persist();
   return { id, size: buf.length, name: db.files[id].name };
 }
+function sniffType(buf, name) {
+  if (buf.slice(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) return 'image/png';
+  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (buf[0] === 0x50 && buf[1] === 0x4B && buf[2] === 3 && buf[3] === 4 && /\.docx$/i.test(String(name || ''))) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  return null;
+}
+async function uploadAttachment(acc, body) {
+  need(isObj(body) && typeof body.data === 'string' && body.data.length > 0, 400, 'Fichier manquant');
+  const buf = Buffer.from(body.data.replace(/^data:[^,]*,/, ''), 'base64');
+  need(buf.length > 0 && buf.length <= MAX_ATTACH, 413, 'Fichier trop volumineux (maximum ' + Math.round(MAX_ATTACH / 1048576) + ' Mo)');
+  const mime = sniffType(buf, body.name);
+  need(mime, 400, 'Format non accepté (PDF, JPG, PNG, WEBP ou DOCX)');
+  const recent = Object.values(db.files).filter(f => f.owner === acc.id && f.kind === 'attach' && Date.now() - f.createdAt < 24 * 3600 * 1000).length;
+  need(recent < 80, 429, 'Trop de fichiers envoyés aujourd’hui');
+  const id = crypto.randomBytes(12).toString('hex');
+  await store.putFile(id, buf);
+  db.files[id] = { name: String(body.name || 'fichier').slice(0, 120), size: buf.length, mime, owner: acc.id, createdAt: Date.now(), kind: 'attach' };
+  persist();
+  return { id, size: buf.length, name: db.files[id].name, mime };
+}
+function canReadAttachment(acc, id) {
+  const f = db.files[id];
+  if (!f || f.kind !== 'attach') return false;
+  if (acc.role === 'admin' || f.owner === acc.id) return true;
+  const ctx = ctxFor(acc);
+  if ((db.state.messages || []).some(m => m.attach && m.attach.fileId === id && visibleMsg(m, ctx))) return true;
+  return (db.state.absences || []).some(a => a.justification && a.justification.attach && a.justification.attach.fileId === id &&
+    (acc.role === 'parent' ? absenceFor(acc, a) : acc.role === 'supervisor' ? !!capsOf(acc).vie : acc.role === 'teacher' ? inClasses(ctx, a.className) : false));
+}
 async function gcFiles() {
   const used = new Set((db.state.bulletins || []).map(b => b.fileId).filter(Boolean));
+  (db.state.messages || []).forEach(m => { if (m.attach && m.attach.fileId) used.add(m.attach.fileId); });
+  (db.state.absences || []).forEach(a => { if (a.justification && a.justification.attach && a.justification.attach.fileId) used.add(a.justification.attach.fileId); });
   for (const [id, f] of Object.entries(db.files)) if (!used.has(id) && Date.now() - f.createdAt > 14 * 24 * 3600 * 1000) { delete db.files[id]; await store.delFile(id); }
 }
 
@@ -656,6 +762,13 @@ async function route(req, res, url, body, ip) {
       return { _binary: zlib.gunzipSync(buf), _name: 'sauvegarde-portail-' + bm[1] + '.json', _type: 'application/json; charset=utf-8' };
     }
   }
+  if (p === '/api/attachments' && m === 'POST') return uploadAttachment(acc, body);
+  const am = /^\/api\/attachments\/([0-9a-f]{24})$/.exec(p);
+  if (am && m === 'GET') {
+    need(canReadAttachment(acc, am[1]), 404, 'Fichier introuvable');
+    const buf = await store.getFile(am[1]); need(buf, 404, 'Fichier introuvable');
+    return { _binary: buf, _name: db.files[am[1]].name, _type: db.files[am[1]].mime };
+  }
   if (p === '/api/files' && m === 'POST') return uploadFile(acc, body);
   let fm = /^\/api\/files\/([0-9a-f]{24})$/.exec(p);
   if (fm && m === 'GET') {
@@ -671,9 +784,9 @@ async function route(req, res, url, body, ip) {
   if (p === '/api/admin/users/reset' && m === 'POST') return resetAccess(acc, body);
   if (p === '/api/admin/users/provision' && m === 'POST') {
     need(acc.role === 'admin', 403, 'Accès administrateur requis');
-    need(isObj(body) && ['teacher', 'parent', 'supervisor'].includes(body.kind), 400, 'Type de compte invalide');
+    need(isObj(body) && ['teacher', 'parent', 'supervisor', 'staff'].includes(body.kind), 400, 'Type de compte invalide');
     const st = db.state;
-    const rec = body.kind === 'supervisor' ? (isObj(st.supervisor) ? st.supervisor : null) : (st[body.kind + 's'] || []).find(x => String(x.id) === String(body.id));
+    const rec = body.kind === 'supervisor' ? (isObj(st.supervisor) ? st.supervisor : null) : (st[body.kind === 'staff' ? 'staff' : body.kind + 's'] || []).find(x => String(x.id) === String(body.id));
     need(rec, 404, 'Compte introuvable dans les données du serveur : synchronisez d\'abord');
     const r = provision(body.kind, rec); persist();
     return { created: r.created, account: publicUser(r.account) };

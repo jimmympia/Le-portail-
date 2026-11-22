@@ -64,6 +64,21 @@ Un seul service qui fait deux choses : il **héberge l'application** (dossier `p
 - Une sauvegarde contient les comptes, messages, notes, absences, parents, enseignants, annonces. Les **codes** des utilisateurs sont conservés tels quels lors d'une restauration. Les **PDF de bulletins** sont stockés à part (table `pp_files`) et ne sont pas inclus ; ils restent disponibles tant qu'une sauvegarde les référence (14 jours minimum après remplacement).
 - Pensez aussi à télécharger une sauvegarde de temps en temps sur votre téléphone : la base Neon gratuite est la seule copie côté serveur.
 
+## Direction, comptabilité, demandes de profil et pièces jointes
+
+### Personnel de direction et comptabilité
+- **Menu « Direction »** (administrateur) : créez les comptes de **Vice-principal**, **Préfet des études** et **Comptable** (nom, fonction, téléphone). Comme les autres, chaque personne se connecte avec son **nom** et choisit son code à 4 chiffres à la première connexion ; **Réinitialiser l'accès** en cas d'oubli.
+- Droits : **Vice-principal / Préfet des études** → contacts et appels des parents, messages, annonces, distribution des bulletins de classe aux professeurs principaux, lecture des absences et des notes. **Comptable** → contacts et appels des parents, messages, annonces. Aucun n'accède aux comptes, aux sauvegardes ni aux réglages. Le **surveillant général** garde ses droits (saisie des absences).
+- Les messages et annonces sont **signés par la fonction** (« Vice-principal », « Comptable »…), imposée par le serveur : personne ne peut se faire passer pour un autre. Un membre du personnel ne voit que ses propres conversations. L'administrateur peut supprimer une annonce.
+
+### Demandes de modification de profil (parents)
+- Le parent ne modifie plus directement son nom ou son téléphone : **Profil → Mes informations → Demander une modification**. L'administrateur est prévenu (notification et bandeau « Action requise »), compare l'avant/après dans **Parents** et **accepte** ou **refuse** (avec motif). Le parent est prévenu de la décision.
+- Un seul dossier en attente à la fois ; un numéro déjà utilisé par une autre personne est refusé. Après acceptation d'un nouveau nom, le parent se connecte avec ce nouveau nom.
+
+### Pièces jointes et justificatifs sur le serveur
+- Photos, PDF et fichiers Word des **messages** et des **justificatifs d'absence** sont stockés sur le serveur (table `pp_files`), plus dans la mémoire des téléphones ni dans la base de données principale. Formats : PDF, JPG, PNG, WEBP, DOCX ; **6 Mo** maximum (`MAX_ATTACH_MB`) ; les photos sont réduites automatiquement avant l'envoi.
+- Le type du fichier est contrôlé d'après son **contenu**. Chaque fichier n'est lisible que par son auteur, l'administrateur et les personnes qui voient le message ou l'absence concernés. Les fichiers jamais rattachés sont supprimés après 14 jours.
+
 ## À savoir
 
 | Sujet | Détail |
@@ -79,15 +94,15 @@ Un seul service qui fait deux choses : il **héberge l'application** (dossier `p
 
 ## Variables d'environnement
 
-`ADMIN_PASSWORD` · `DATABASE_URL` · `FIRST_LOGIN_PHONE` · `RESET_ALL_ACCESS` · `MAX_FILE_MB` · `PUSH_ENABLED` · `VAPID_SUBJECT` · `BACKUP_EVERY_HOURS` · `BACKUP_KEEP` · `ADMIN_USERNAME` (défaut `admin`) · `RESET_ADMIN` · `ALLOWED_ORIGINS` (défaut `*`) · `MAX_BODY_MB` · `DATA_DIR` (mode fichier) · `PGSSL=disable` (base locale sans SSL) · `PORT`
+`ADMIN_PASSWORD` · `DATABASE_URL` · `FIRST_LOGIN_PHONE` · `RESET_ALL_ACCESS` · `MAX_FILE_MB` · `PUSH_ENABLED` · `VAPID_SUBJECT` · `MAX_ATTACH_MB` · `BACKUP_EVERY_HOURS` · `BACKUP_KEEP` · `ADMIN_USERNAME` (défaut `admin`) · `RESET_ADMIN` · `ALLOWED_ORIGINS` (défaut `*`) · `MAX_BODY_MB` · `DATA_DIR` (mode fichier) · `PGSSL=disable` (base locale sans SSL) · `PORT`
 
 ## Essai en local
 
 ```
 ADMIN_PASSWORD=MonMotDePasse node server.js     # http://localhost:3000
-npm test                                        # 135 vérifications de l'API
+npm test                                        # 197 vérifications de l'API
 ```
 
 ## Routes
 
-`GET /api/health` · `POST /api/auth/login` · `POST /api/auth/status` · `POST /api/auth/setup` · `POST /api/auth/logout` · `POST /api/auth/password` · `POST /api/sync` · `POST /api/messages` · `POST /api/messages/:id/read` · `POST /api/notifications/sync` · `POST /api/admin/users/provision` · `POST /api/admin/users/reset` · `POST /api/files` · `GET /api/files/:id` · `GET /api/push/key` · `POST /api/push/subscribe` · `POST /api/push/unsubscribe` · `POST /api/push/test` · `GET /api/admin/push` · `GET/POST /api/admin/backups` · `GET /api/admin/backups/:id` · `POST /api/admin/backups/:id/restore`
+`GET /api/health` · `POST /api/auth/login` · `POST /api/auth/status` · `POST /api/auth/setup` · `POST /api/auth/logout` · `POST /api/auth/password` · `POST /api/sync` · `POST /api/messages` · `POST /api/messages/:id/read` · `POST /api/notifications/sync` · `POST /api/admin/users/provision` · `POST /api/admin/users/reset` · `POST /api/files` · `GET /api/files/:id` · `POST /api/attachments` · `GET /api/attachments/:id` · `GET /api/push/key` · `POST /api/push/subscribe` · `POST /api/push/unsubscribe` · `POST /api/push/test` · `GET /api/admin/push` · `GET/POST /api/admin/backups` · `GET /api/admin/backups/:id` · `POST /api/admin/backups/:id/restore`

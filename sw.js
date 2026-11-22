@@ -1,5 +1,5 @@
-/* Portail Parents 2.3.130 — service worker : coque hors ligne, notifications push, jamais l'API en cache */
-const CACHE = 'portail-parents-2-3-130';
+/* Portail Parents 2.3.131 — service worker : coque hors ligne, notifications push, jamais l'API en cache */
+const CACHE = 'portail-parents-2-3-131';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
